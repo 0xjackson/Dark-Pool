@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.env
+.env.local
+
+# Foundry
+/contracts/cache/
+/contracts/out/
+/contracts/broadcast/
+
+# Next.js
+.next/
+out/
+
+# Misc
+.DS_Store
+*.log
