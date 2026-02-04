@@ -1,0 +1,105 @@
+sequenceDiagram
+    autonumber
+    
+    participant User as 👤 Seller
+    participant Client as 🖥️ Client<br/>(React dApp)
+    participant Server as ⚙️ Server<br/>(API + Yellow SDK)
+    participant Constraint as 📜 Constraint<br/>Contract
+    participant Pyth as 🔮 Pyth<br/>Oracle
+    participant Yellow as 🟡 Yellow<br/>Clearnode
+    participant Buyer as 👤 Buyer
+    participant Hook as 🦄 v4 Hook
+    participant PM as 🎱 Pool<br/>Manager
+
+    rect rgb(99, 102, 241, 0.15)
+        Note over User,PM: 🖥️ PHASE 0: CLIENT INTERACTION
+        
+        User->>Client: Connect wallet (MetaMask)
+        Client->>Client: Load trading UI
+        User->>Client: "Sell 500 ETH, max 1% slippage"
+        Client->>Client: Validate inputs
+        Client->>Server: POST /orders (sellToken, amount, slippage)
+    end
+
+    rect rgb(139, 92, 246, 0.15)
+        Note over User,PM: ⚙️ PHASE 1: SERVER PROCESSING
+        
+        Server->>Server: Generate order params
+        Server->>Pyth: Fetch fresh price update
+        Pyth-->>Server: priceUpdateData
+        Server->>Constraint: createOrder(ETH, USDC, 500, 100bps, expiry, priceUpdate)
+    end
+
+    rect rgb(16, 185, 129, 0.15)
+        Note over User,PM: 📜 PHASE 2: CONSTRAINT LOCKING
+        
+        Constraint->>Constraint: Lock 500 ETH from user
+        Constraint->>Pyth: getPrice(ETH/USD)
+        Pyth-->>Constraint: $2,000.00
+        
+        Constraint->>Constraint: Calculate minOutput<br/>500 × $2,000 × 0.99 = $990,000
+        Constraint->>Constraint: Store order constraints
+        
+        Constraint-->>Server: orderId + constraints
+        Server-->>Client: { orderId, status: "active", minOutput: 990000 }
+        Client-->>User: "Order created! Waiting for match..."
+    end
+
+    rect rgb(245, 158, 11, 0.15)
+        Note over User,PM: 🟡 PHASE 3: PRIVATE MATCHING
+        
+        Server->>Yellow: Submit encrypted order
+        Yellow->>Yellow: Add to dark orderbook
+        
+        Note over Yellow: Buyer submits order via their client/server
+        Buyer->>Yellow: Encrypted buy order (995k USDC)
+        
+        Yellow->>Yellow: Match found!<br/>Seller: 500 ETH @ $990k min<br/>Buyer: $995k USDC
+        
+        Yellow-->>Server: Match notification
+        Server-->>Client: WebSocket: "Match found!"
+        Client-->>User: "Match found! Sign to confirm"
+        
+        User->>Client: Confirm settlement
+        Client->>Server: Sign settlement message
+        Server->>Yellow: Submit seller signature
+        
+        Note over Yellow: Buyer also signs
+        Yellow->>Yellow: Both signatures collected
+    end
+
+    rect rgb(255, 0, 122, 0.15)
+        Note over User,PM: 🛡️ PHASE 4: CONSTRAINT VERIFICATION
+        
+        Yellow->>Hook: settleP2P(orderId, buyerOrderId, sigs, amounts)
+        
+        Hook->>Hook: Verify both signatures ✓
+        
+        Hook->>Constraint: verifyAndSettle(orderId, buyer, $995,000)
+        
+        Constraint->>Constraint: Check: active? ✓
+        Constraint->>Constraint: Check: not expired? ✓
+        Constraint->>Constraint: Check: $995k ≥ $990k? ✓
+        
+        Constraint-->>Hook: TRUE ✅
+    end
+
+    rect rgb(59, 130, 246, 0.15)
+        Note over User,PM: ⚛️ PHASE 5: ATOMIC SETTLEMENT
+        
+        Hook->>Constraint: getLockedTokens(orderId)
+        Constraint-->>Hook: (ETH, 500, seller)
+        
+        Hook->>PM: take(ETH, 500) from Constraint
+        Hook->>PM: settle(ETH, 500) to Buyer
+        
+        Hook->>PM: take(USDC, 995k) from Buyer
+        Hook->>PM: settle(USDC, 995k) to Seller
+        
+        PM-->>Buyer: Receives 500 ETH ✅
+        PM-->>User: Receives $995,000 USDC ✅
+        
+        Hook-->>Server: Settlement complete event
+        Server-->>Client: WebSocket: "Settlement complete!"
+        Client-->>User: "🎉 Trade complete! +$995,000 USDC"
+    end

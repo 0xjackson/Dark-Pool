@@ -1,0 +1,105 @@
+flowchart TB
+    subgraph Header[" "]
+        H1["🌑 DARK POOL - FIVE LAYER ARCHITECTURE"]
+    end
+
+    subgraph Users["👥 PARTICIPANTS"]
+        direction LR
+        U1["🐋 Whales"]
+        U2["🏦 Institutions"]
+        U3["🤖 Market Makers"]
+        U4["🏢 Funds"]
+    end
+
+    subgraph L0["🖥️ LAYER 0: CLIENT"]
+        direction TB
+        L0_Title["User-Facing Application"]
+        
+        L0_A["🦊 WALLET CONNECT<br/>━━━━━━━━━━━━━━━━<br/>MetaMask / WalletConnect<br/>Ledger / Coinbase Wallet<br/>Sign transactions"]
+        
+        L0_B["🎨 TRADING UI<br/>━━━━━━━━━━━━━━━━<br/>Order entry form<br/>Slippage selector<br/>Position dashboard"]
+        
+        L0_C["📊 REAL-TIME DATA<br/>━━━━━━━━━━━━━━━━<br/>Live prices<br/>Order status<br/>Match notifications"]
+        
+        L0_D["🔔 NOTIFICATIONS<br/>━━━━━━━━━━━━━━━━<br/>Match alerts<br/>Settlement confirmations<br/>Error handling"]
+    end
+
+    subgraph L1["⚙️ LAYER 1: SERVER"]
+        direction TB
+        L1_Title["Backend Infrastructure"]
+        
+        L1_A["🌐 API GATEWAY<br/>━━━━━━━━━━━━━━━━<br/>REST endpoints<br/>WebSocket connections<br/>Rate limiting"]
+        
+        L1_B["🟡 YELLOW SDK<br/>━━━━━━━━━━━━━━━━<br/>Clearnode connection<br/>State channel management<br/>Signature relay"]
+        
+        L1_C["📊 ORDER MANAGER<br/>━━━━━━━━━━━━━━━━<br/>Track active orders<br/>Match notifications<br/>Settlement coordination"]
+        
+        L1_D["💾 DATABASE<br/>━━━━━━━━━━━━━━━━<br/>Order history<br/>User preferences<br/>Analytics"]
+    end
+
+    subgraph L2["📜 LAYER 2: CONSTRAINT ENFORCEMENT"]
+        direction TB
+        L2_Title["On-Chain Trustless Rules"]
+        
+        L2_A["🔒 ASSET LOCKING<br/>━━━━━━━━━━━━━━━━<br/>User's tokens held in contract<br/>Released only on valid settle<br/>Or user cancellation"]
+        
+        L2_B["🔮 ORACLE INTEGRATION<br/>━━━━━━━━━━━━━━━━<br/>Pyth price at order creation<br/>Immutable reference point<br/>No manipulation possible"]
+        
+        L2_C["🧮 CONSTRAINT MATH<br/>━━━━━━━━━━━━━━━━<br/>minOutput = amount × price × (1 - slippage)<br/>Stored on-chain<br/>Enforced at settlement"]
+        
+        L2_D["🛡️ SETTLEMENT GATE<br/>━━━━━━━━━━━━━━━━<br/>verifyAndSettle() must pass<br/>Rejects bad settlements<br/>Protects user always"]
+    end
+
+    subgraph L3["🟡 LAYER 3: PRIVATE MATCHING"]
+        direction TB
+        L3_Title["Off-Chain Yellow Network"]
+        
+        L3_A["🔐 ENCRYPTED ORDERS<br/>━━━━━━━━━━━━━━━━<br/>AES-256 encryption<br/>Only matching engine decrypts<br/>Public sees nothing"]
+        
+        L3_B["📒 DARK ORDERBOOK<br/>━━━━━━━━━━━━━━━━<br/>Orders indexed privately<br/>No public visibility<br/>MEV impossible"]
+        
+        L3_C["⚡ P2P MATCHING<br/>━━━━━━━━━━━━━━━━<br/>Find counterparties<br/>Respect constraints<br/>Optimize execution"]
+        
+        L3_D["✍️ SIGNATURE COORD<br/>━━━━━━━━━━━━━━━━<br/>Collect both party sigs<br/>Bundle settlement params<br/>Submit to hook"]
+    end
+
+    subgraph L4["🦄 LAYER 4: ATOMIC SETTLEMENT"]
+        direction TB
+        L4_Title["Uniswap v4 Hook"]
+        
+        L4_A["🔍 SIG VERIFICATION<br/>━━━━━━━━━━━━━━━━<br/>Both parties signed?<br/>Settlement hash valid?<br/>No forgery possible"]
+        
+        L4_B["📞 CONSTRAINT CALL<br/>━━━━━━━━━━━━━━━━<br/>Hook → Constraint Contract<br/>Verify all rules met<br/>REVERT if not"]
+        
+        L4_C["⚛️ ATOMIC SWAP<br/>━━━━━━━━━━━━━━━━<br/>PoolManager.take() + settle()<br/>All-or-nothing execution<br/>No partial fills"]
+        
+        L4_D["🚫 NO POOL LIQUIDITY<br/>━━━━━━━━━━━━━━━━<br/>Pure P2P transfer<br/>Zero pool interaction<br/>No bank run risk"]
+    end
+
+    subgraph Result["✅ RESULT"]
+        direction LR
+        R1["Private execution"]
+        R2["Guaranteed slippage"]
+        R3["Atomic settlement"]
+        R4["Zero pool risk"]
+    end
+
+    Users --> L0
+    L0 --> L1
+    L1 --> L2
+    L2 --> L3
+    L3 --> L4
+    L4 --> Result
+
+    L0_A ~~~ L0_B ~~~ L0_C ~~~ L0_D
+    L1_A ~~~ L1_B ~~~ L1_C ~~~ L1_D
+    L2_A ~~~ L2_B ~~~ L2_C ~~~ L2_D
+    L3_A ~~~ L3_B ~~~ L3_C ~~~ L3_D
+    L4_A ~~~ L4_B ~~~ L4_C ~~~ L4_D
+
+    style L0 fill:#6366F1,stroke:#4338CA,color:#fff
+    style L1 fill:#8B5CF6,stroke:#6D28D9,color:#fff
+    style L2 fill:#10B981,stroke:#047857,color:#fff
+    style L3 fill:#F59E0B,stroke:#B45309,color:#000
+    style L4 fill:#FF007A,stroke:#99004d,color:#fff
+    style Result fill:#3B82F6,stroke:#1E40AF,color:#fff
