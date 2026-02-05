@@ -1,0 +1,62 @@
+flowchart TB
+    subgraph Users
+        UA[User A Wallet]
+        UB[User B Wallet]
+    end
+
+    subgraph Frontend["React Frontend"]
+        OrderUI[Order Form + Wallet Signing]
+        Status[Order Status / WebSocket Feed]
+    end
+
+    subgraph Backend["Node.js Backend"]
+        API[REST API]
+        OrderBook[Order Book]
+        Matcher[Matching Engine]
+        DB[(PostgreSQL<br/>Orders + Signatures)]
+        YellowSDK[Yellow SDK Client]
+    end
+
+    subgraph YourContract["Your External Contract"]
+        Commit[commitOrder<br/>stores keccak256 hash]
+        Reveal[revealAndMatch<br/>verifies hash matches payload]
+        Hashes[(Hash Storage)]
+    end
+
+    subgraph Yellow["Yellow Network"]
+        subgraph OnChain["On-Chain"]
+            Custody[Custody Contract<br/>deposit/create/resize/close]
+        end
+        
+        subgraph OffChain["Off-Chain"]
+            Clearnode[Clearnode]
+            ChannelA[State Channel<br/>User A ↔ Clearnode]
+            ChannelB[State Channel<br/>User B ↔ Clearnode]
+            AppSession[App Session<br/>User A ↔ User B<br/>P2P Trade Settlement]
+        end
+    end
+
+    %% User flows
+    UA & UB --> OrderUI
+    OrderUI --> API
+    Status --> UA & UB
+
+    %% Backend flows
+    API --> DB
+    API --> OrderBook
+    OrderBook --> Matcher
+    Matcher --> YellowSDK
+
+    %% Commit-reveal flows
+    API -->|1. commit hash| Commit
+    Commit --> Hashes
+    Matcher -->|2. reveal on match| Reveal
+    Reveal -->|verify| Hashes
+
+    %% Yellow flows
+    YellowSDK -->|3. create app session| Clearnode
+    UA -->|initial deposit| Custody
+    UB -->|initial deposit| Custody
+    Clearnode --> ChannelA & ChannelB
+    ChannelA & ChannelB -->|4. allocate to session| AppSession
+    AppSession -->|5. P2P settlement| Clearnode
