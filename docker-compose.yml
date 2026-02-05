@@ -46,6 +46,9 @@ services:
     build:
       context: ./app/web
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID}
+        NEXT_PUBLIC_DEFAULT_CHAIN_ID: ${NEXT_PUBLIC_DEFAULT_CHAIN_ID:-1}
     container_name: darkpool-frontend
     environment:
       NODE_ENV: production

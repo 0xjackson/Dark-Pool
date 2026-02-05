@@ -2,6 +2,9 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
 
+# Install Python and build tools needed for native dependencies
+RUN apk add --no-cache python3 make g++
+
 # Copy package files
 COPY package*.json ./
 
@@ -17,6 +20,14 @@ COPY --from=deps /app/node_modules ./node_modules
 
 # Copy application code
 COPY . .
+
+# Accept build arguments for environment variables
+ARG NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID
+ARG NEXT_PUBLIC_DEFAULT_CHAIN_ID=1
+
+# Set environment variables for build
+ENV NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=${NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID}
+ENV NEXT_PUBLIC_DEFAULT_CHAIN_ID=${NEXT_PUBLIC_DEFAULT_CHAIN_ID}
 
 # Build Next.js application
 RUN npm run build
