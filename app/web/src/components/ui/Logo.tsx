@@ -29,7 +29,7 @@ export function Logo({
         width={width}
         height={height}
         priority
-        className={withGlow ? 'drop-shadow-[0_0_50px_rgba(147,51,234,0.5)]' : ''}
+        className={`rounded-3xl ${withGlow ? 'drop-shadow-[0_0_50px_rgba(147,51,234,0.5)]' : ''}`}
       />
     </div>
   );

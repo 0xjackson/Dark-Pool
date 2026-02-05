@@ -15,7 +15,7 @@ interface ContainerProps {
  */
 export function Container({ children, className = '' }: ContainerProps) {
   return (
-    <div className={`relative z-10 min-h-screen flex items-center justify-center p-4 ${className}`}>
+    <div className={`relative z-10 h-full flex items-center justify-center p-4 ${className}`}>
       <div className="w-full max-w-md">
         {children}
       </div>

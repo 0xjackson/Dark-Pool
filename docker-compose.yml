@@ -23,14 +23,17 @@ services:
   backend:
     build:
       context: ./app/server
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev
     container_name: darkpool-backend
     environment:
-      NODE_ENV: production
+      NODE_ENV: development
       PORT: 3001
       DATABASE_URL: postgresql://darkpool:darkpool_dev_password@postgres:5432/darkpool
     ports:
       - "3001:3001"
+    volumes:
+      - ./app/server:/app
+      - /app/node_modules
     depends_on:
       postgres:
         condition: service_healthy
@@ -45,16 +48,20 @@ services:
   frontend:
     build:
       context: ./app/web
-      dockerfile: Dockerfile
-      args:
-        NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID}
-        NEXT_PUBLIC_DEFAULT_CHAIN_ID: ${NEXT_PUBLIC_DEFAULT_CHAIN_ID:-1}
+      dockerfile: Dockerfile.dev
     container_name: darkpool-frontend
     environment:
-      NODE_ENV: production
+      NODE_ENV: development
       NEXT_PUBLIC_API_URL: http://backend:3001
+      NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID}
+      NEXT_PUBLIC_DEFAULT_CHAIN_ID: ${NEXT_PUBLIC_DEFAULT_CHAIN_ID:-1}
+      WATCHPACK_POLLING: true
     ports:
       - "3000:3000"
+    volumes:
+      - ./app/web:/app
+      - /app/node_modules
+      - /app/.next
     depends_on:
       backend:
         condition: service_healthy
