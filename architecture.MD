@@ -38,12 +38,13 @@ graph TB
     end
 
     subgraph "Blockchain Layer"
-        Contract[DarkPool.sol<br/>Commit-Reveal Contract]
+        Contract[DarkPoolRouter.sol<br/>Commit-Reveal Contract]
         Yellow[Yellow Network<br/>Settlement Layer]
     end
 
     %% User interactions
-    Wallet -->|Sign Orders| FE
+    Wallet -->|approve + depositAndCommit| FE
+    FE -->|depositAndCommit / commitOnly| Contract
     FE -->|WebSocket| WS
     FE -->|HTTP API| API
 
@@ -69,10 +70,9 @@ graph TB
     WS -->|Broadcast| FE
 
     %% Blockchain interactions
-    BE -->|Commit Hash| Contract
-    BE -->|Reveal Order| Contract
-    BE -->|Settle Match| Yellow
-    Yellow -->|Settlement TX| Contract
+    BE -->|Verify Hash| Contract
+    BE -->|Reveal+Settle| Contract
+    Contract -->|Settlement| Yellow
 
     %% Styling
     classDef frontend fill:#61dafb,stroke:#333,stroke-width:2px,color:#000
@@ -96,24 +96,25 @@ graph TB
 sequenceDiagram
     participant User
     participant Frontend
-    participant Backend
     participant Contract
+    participant Backend
     participant Warlock
     participant Database
 
     User->>Frontend: Create Order (BUY/SELL)
-    Frontend->>User: Request Wallet Signature
-    User->>Frontend: Sign Order Data
+    Frontend->>Contract: approve(token, amount) [if needed]
+    Contract-->>Frontend: Approval Confirmed
 
-    Frontend->>Backend: POST /api/orders
-    Backend->>Contract: commitOrder(hash)
-    Contract-->>Backend: OrderCommitted Event
+    Frontend->>Contract: depositAndCommit(token, amount, orderId, orderHash)
+    Contract-->>Frontend: OrderCommitted Event
+
+    Frontend->>Backend: POST /api/orders (order details)
+    Backend->>Contract: Read commitments(orderId) via RPC
+    Contract-->>Backend: Return (user, orderHash, timestamp, status)
+
+    Backend->>Backend: Verify keccak256(details) == on-chain hash
 
     Backend->>Database: INSERT INTO orders (COMMITTED)
-    Backend->>Contract: revealOrder(order_data)
-    Contract-->>Backend: OrderRevealed Event
-
-    Backend->>Database: UPDATE orders (REVEALED)
     Backend->>Warlock: SubmitOrder (gRPC)
 
     Warlock->>Warlock: Load into Order Book
@@ -141,9 +142,9 @@ flowchart TD
     Loop -->|Yes| Check{Order Fully Filled?}
 
     Check -->|Yes| Done
-    Check -->|No| CalcQty[Calculate Match Quantity<br/>min(remaining, candidate.remaining)]
+    Check -->|No| CalcQty[Calculate Match Quantity<br/>min remaining, candidate.remaining]
 
-    CalcQty --> CalcPrice[Calculate Execution Price<br/>avg(buy.price, sell.price)]
+    CalcQty --> CalcPrice[Calculate Execution Price<br/>avg buy.price, sell.price]
     CalcPrice --> Transaction[Begin DB Transaction]
 
     Transaction --> InsertMatch[INSERT INTO matches]
@@ -170,8 +171,8 @@ flowchart TD
 graph LR
     subgraph "WebSocket Channels"
         OB[orderbook:ETH-USDC<br/>Order book updates]
-        Orders[orders:0x1234...<br/>User's order updates]
-        Matches[matches:0x1234...<br/>User's match notifications]
+        Orders[orders:0x1234...<br/>User order updates]
+        Matches[matches:0x1234...<br/>User match notifications]
         MatchAll[matches:all<br/>All match notifications]
     end
 
@@ -207,6 +208,7 @@ graph LR
 - User interface for trading
 - Wallet integration (MetaMask, WalletConnect)
 - Order form with variance slider
+- ERC-20 token approval and on-chain commitment (depositAndCommit / commitOnly)
 - Real-time order book display
 - Order history and match notifications
 - WebSocket client for real-time updates
@@ -219,25 +221,24 @@ graph LR
 
 ### Backend (Node.js)
 
-**Technology:** Node.js, Express, TypeScript, gRPC, WebSocket (ws)
+**Technology:** Node.js, Express, TypeScript, gRPC, WebSocket (ws), ethers.js
 
 **Responsibilities:**
 - REST API for order management
 - WebSocket server for real-time updates
 - gRPC client to Warlock matching engine
-- Smart contract interactions (commit-reveal)
-- Yellow Network settlement integration
+- On-chain commitment verification via RPC (reads DarkPoolRouter state)
 - Database queries for order history
 
 **Key Files:**
 - `app/server/src/server.ts` - Main server entry point
 - `app/server/src/routes/orders.ts` - Order API endpoints
 - `app/server/src/services/warlockClient.ts` - gRPC client wrapper
+- `app/server/src/services/commitmentVerifier.ts` - On-chain commitment hash verification
 - `app/server/src/websocket/server.ts` - WebSocket server
-- `app/server/src/services/yellowNetwork.ts` - Yellow SDK integration
 
 **API Endpoints:**
-- `POST /api/orders` - Create order
+- `POST /api/orders` - Submit order (after on-chain commit; backend verifies hash)
 - `GET /api/orders/:id` - Get order by ID
 - `GET /api/orders/user/:address` - Get user's orders
 - `DELETE /api/orders/:id` - Cancel order
@@ -280,7 +281,7 @@ graph LR
 **Schema:**
 
 **Orders Table:**
-- Stores all order states (PENDING → COMMITTED → REVEALED → FILLED)
+- Stores all order states (COMMITTED -> MATCHED -> SETTLING -> SETTLED)
 - Supports variance tolerance (min_price, max_price)
 - Tracks fill quantities (filled_quantity, remaining_quantity)
 - Commit-reveal fields (commitment_hash, commitment_tx)
@@ -300,19 +301,21 @@ graph LR
 
 ### Smart Contracts (Solidity)
 
-**Technology:** Solidity 0.8.20, Foundry
+**Technology:** Solidity 0.8.19, Foundry
 
-**DarkPool.sol:**
+**DarkPoolRouter.sol:**
 - Commit-reveal pattern to prevent front-running
-- `commitOrder(hash)` - Commit order hash on-chain
-- `revealOrder(...)` - Reveal order details after commitment
-- `cancelCommitment(hash)` - Cancel a commitment
-- Minimum reveal delay (1 block) prevents same-block reveals
-- Commitment expiration (1 hour) prevents stale commitments
+- No EIP-712 signatures -- authorization relies on `msg.sender` proof at commit time and `keccak256(abi.encode(OrderDetails))` hash verification at reveal time
+- `depositAndCommit(token, depositAmount, orderId, orderHash)` - Pull tokens via `safeTransferFrom`, deposit into Yellow Custody, and store commitment (user, orderHash, timestamp, status) in one transaction
+- `commitOnly(orderId, orderHash)` - Store commitment only (user already has Yellow Custody balance)
+- `cancel(orderId)` - Cancel an active commitment (caller must be the `msg.sender` that committed)
+- `revealAndSettle(sellerOrderId, buyerOrderId, sellerDetails, buyerDetails)` - Engine-only: verify both commitments are active, hashes match `keccak256(abi.encode(OrderDetails))`, orders are not expired, tokens are compatible, and slippage constraints are met; marks both as `Settling`
+- `markFullySettled(sellerOrderId, buyerOrderId)` - Engine-only: transition orders from `Settling` to `Settled` after Yellow Network settlement completes
+- Order statuses: `None -> Active -> Settling -> Settled` (or `Active -> Cancelled`)
 
 **Deployment:**
 ```bash
-forge script script/DeployDarkPool.s.sol --rpc-url $RPC_URL --broadcast
+forge script script/DeployDarkPoolRouter.s.sol --rpc-url $RPC_URL --broadcast
 ```
 
 ## Variance/Slippage Tolerance
@@ -321,14 +324,14 @@ forge script script/DeployDarkPool.s.sol --rpc-url $RPC_URL --broadcast
 
 Orders specify a **variance_bps** (basis points) that determines acceptable price range:
 
-- `variance_bps = 100` → 1% slippage tolerance
-- `variance_bps = 200` → 2% slippage tolerance
-- `variance_bps = 10000` → 100% slippage (match any price)
+- `variance_bps = 100` -> 1% slippage tolerance
+- `variance_bps = 200` -> 2% slippage tolerance
+- `variance_bps = 10000` -> 100% slippage (match any price)
 
 **Price Calculation:**
 ```
-min_price = price × (1 - variance_bps / 10000)
-max_price = price × (1 + variance_bps / 10000)
+min_price = price * (1 - variance_bps / 10000)
+max_price = price * (1 + variance_bps / 10000)
 ```
 
 **Matching Condition:**
@@ -343,20 +346,22 @@ BUY matches SELL when: buy.max_price >= sell.min_price
 - max_price = $2040
 
 **Matches:**
-- ✅ SELL 600 ETH @ $1990 (within range)
-- ✅ SELL 400 ETH @ $2030 (within range)
-- ❌ SELL 500 ETH @ $2050 (above max_price)
+- SELL 600 ETH @ $1990 (within range) -- matched
+- SELL 400 ETH @ $2030 (within range) -- matched
+- SELL 500 ETH @ $2050 (above max_price) -- not matched
 
 ## Security Considerations
 
 1. **Commit-Reveal Pattern:**
-   - Orders are committed as hash on-chain before revealing
-   - Prevents front-running by hiding order details
-   - Minimum 1-block delay between commit and reveal
+   - Orders are committed as a keccak256 hash on-chain before details are submitted to the backend
+   - Prevents front-running by hiding order details until matching
+   - `msg.sender` is recorded at commit time, binding the commitment to the user's address
 
-2. **Signature Verification:**
-   - All orders must be signed by user's wallet
-   - Backend verifies signatures before submission
+2. **On-chain Commitment Verification:**
+   - Backend reads the DarkPoolRouter contract state via RPC to verify commitments
+   - Recomputes `keccak256(abi.encode(OrderDetails))` from submitted fields and checks it matches the on-chain `orderHash`
+   - Ensures the commitment is in `Active` status before accepting the order
+   - No signatures required -- the on-chain commitment is the source of truth
 
 3. **gRPC Security:**
    - Production: Use mTLS for authentication
@@ -413,7 +418,7 @@ docker build -t darkpool-warlock:v1.0.0 ./warlock
 3. **Deploy Smart Contract:**
 ```bash
 cd contracts
-forge script script/DeployDarkPool.s.sol \
+forge script script/DeployDarkPoolRouter.s.sol \
   --rpc-url $RPC_URL \
   --private-key $PRIVATE_KEY \
   --broadcast \
@@ -465,10 +470,11 @@ All components use structured logging:
 - Variance calculations
 
 ### Integration Tests
-- Full order lifecycle (commit → reveal → match)
-- gRPC communication (Backend ↔ Warlock)
+- Full order lifecycle (commit -> match -> settle)
+- gRPC communication (Backend <-> Warlock)
 - Database transactions
 - WebSocket subscriptions
+- On-chain commitment verification
 
 ### Load Tests
 - Simulate 100-1000 orders/sec
@@ -477,7 +483,7 @@ All components use structured logging:
 - Verify concurrent matching
 
 ### E2E Tests
-- Frontend → Backend → Warlock → Settlement
+- Frontend -> Contract -> Backend -> Warlock -> Settlement
 - Test with real wallets on testnet
 - Verify smart contract interactions
 
