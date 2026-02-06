@@ -1,0 +1,28 @@
+{
+  "name": "dark-pool",
+  "version": "1.0.0",
+  "description": "Dark Pool Decentralized Exchange",
+  "scripts": {
+    "test:e2e": "./test/run-e2e.sh",
+    "test:e2e:simple": "./test/e2e-simple.sh",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f",
+    "migrate": "docker exec -i darkpool-postgres psql -U darkpool -d darkpool < warlock/migrations/001_initial_schema.up.sql"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/0xjackson/Dark-Pool"
+  },
+  "keywords": [
+    "dark-pool",
+    "dex",
+    "blockchain",
+    "matching-engine"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "go": "^3.0.1"
+  }
+}
