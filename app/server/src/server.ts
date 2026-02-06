@@ -3,7 +3,6 @@ import { createServer } from 'http';
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
 import ordersRouter, { setDatabase } from './routes/orders';
-import commitHashRouter, { setDatabase as setCommitHashDatabase } from './routes/commitHash';
 import DarkPoolWebSocketServer from './websocket/server';
 import { getWarlockClient } from './services/warlockClient';
 
@@ -41,7 +40,6 @@ db.query('SELECT NOW()', (err: Error | null, res: any) => {
 
 // Set database for routes
 setDatabase(db);
-setCommitHashDatabase(db);
 
 // Middleware
 app.use(express.json());
@@ -85,7 +83,6 @@ app.get('/health', async (req, res) => {
 
 // API Routes
 app.use('/api/orders', ordersRouter);
-app.use('/api/commit-hash', commitHashRouter);
 
 
 // Initialize WebSocket server

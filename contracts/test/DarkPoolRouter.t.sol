@@ -12,23 +12,14 @@ contract DarkPoolRouterTest is Test {
     MockERC20 public tokenB;
     MockYellowCustody public custody;
 
-    uint256 aliceKey = 0xa11ce;
-    uint256 bobKey = 0xb0b;
-    address alice;
-    address bob;
+    address alice = address(0xA);
+    address bob = address(0xB);
     address engine = address(0xE);
 
     bytes32 constant SELLER_ORDER_ID = keccak256("seller-order-1");
     bytes32 constant BUYER_ORDER_ID = keccak256("buyer-order-1");
 
-    bytes32 constant ORDER_TYPEHASH = keccak256(
-        "Order(bytes32 orderId,address sellToken,address buyToken,uint256 sellAmount,uint256 minBuyAmount,uint256 expiresAt)"
-    );
-
     function setUp() public {
-        alice = vm.addr(aliceKey);
-        bob = vm.addr(bobKey);
-
         tokenA = new MockERC20("Token A", "TKA");
         tokenB = new MockERC20("Token B", "TKB");
         custody = new MockYellowCustody();
@@ -45,34 +36,7 @@ contract DarkPoolRouterTest is Test {
 
     // ============ HELPERS ============
 
-    function _signOrder(
-        uint256 privateKey,
-        bytes32 orderId,
-        address sellToken,
-        address buyToken,
-        uint256 sellAmount,
-        uint256 minBuyAmount,
-        uint256 expiresAt
-    ) internal view returns (bytes memory) {
-        bytes32 structHash =
-            keccak256(abi.encode(ORDER_TYPEHASH, orderId, sellToken, buyToken, sellAmount, minBuyAmount, expiresAt));
-        bytes32 domainSeparator = keccak256(
-            abi.encode(
-                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
-                keccak256("DarkPool"),
-                keccak256("1"),
-                block.chainid,
-                address(router)
-            )
-        );
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(privateKey, digest);
-        return abi.encodePacked(r, s, v);
-    }
-
     function _makeSellerOrder(uint256 expiresAt) internal view returns (DarkPoolRouter.OrderDetails memory) {
-        bytes memory sig =
-            _signOrder(aliceKey, SELLER_ORDER_ID, address(tokenA), address(tokenB), 100 ether, 90 ether, expiresAt);
         return DarkPoolRouter.OrderDetails({
             orderId: SELLER_ORDER_ID,
             user: alice,
@@ -80,14 +44,11 @@ contract DarkPoolRouterTest is Test {
             buyToken: address(tokenB),
             sellAmount: 100 ether,
             minBuyAmount: 90 ether,
-            expiresAt: expiresAt,
-            signature: sig
+            expiresAt: expiresAt
         });
     }
 
     function _makeBuyerOrder(uint256 expiresAt) internal view returns (DarkPoolRouter.OrderDetails memory) {
-        bytes memory sig =
-            _signOrder(bobKey, BUYER_ORDER_ID, address(tokenB), address(tokenA), 95 ether, 90 ether, expiresAt);
         return DarkPoolRouter.OrderDetails({
             orderId: BUYER_ORDER_ID,
             user: bob,
@@ -95,8 +56,7 @@ contract DarkPoolRouterTest is Test {
             buyToken: address(tokenA),
             sellAmount: 95 ether,
             minBuyAmount: 90 ether,
-            expiresAt: expiresAt,
-            signature: sig
+            expiresAt: expiresAt
         });
     }
 
@@ -191,24 +151,21 @@ contract DarkPoolRouterTest is Test {
         router.revealAndSettle(SELLER_ORDER_ID, BUYER_ORDER_ID, seller, buyer);
     }
 
-    // ============ INVALID SIGNATURE ============
+    // ============ HASH MISMATCH ============
 
-    function test_RevertBadSignature() public {
+    function test_RevertHashMismatch() public {
         uint256 expiresAt = block.timestamp + 1 hours;
         DarkPoolRouter.OrderDetails memory seller = _makeSellerOrder(expiresAt);
         DarkPoolRouter.OrderDetails memory buyer = _makeBuyerOrder(expiresAt);
 
-        // Sign seller order with bob's key
-        seller.signature =
-            _signOrder(bobKey, SELLER_ORDER_ID, address(tokenA), address(tokenB), 100 ether, 90 ether, expiresAt);
+        // Commit both orders normally
+        _commitBothOrders(seller, buyer);
 
-        vm.prank(alice);
-        router.commitOnly(SELLER_ORDER_ID, keccak256(abi.encode(seller)));
-        vm.prank(bob);
-        router.depositAndCommit(address(tokenB), 95 ether, BUYER_ORDER_ID, keccak256(abi.encode(buyer)));
+        // Tamper with seller details before reveal
+        seller.sellAmount = 999 ether;
 
         vm.prank(engine);
-        vm.expectRevert("Invalid seller signature");
+        vm.expectRevert("Seller hash mismatch");
         router.revealAndSettle(SELLER_ORDER_ID, BUYER_ORDER_ID, seller, buyer);
     }
 
