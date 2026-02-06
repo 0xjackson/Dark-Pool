@@ -1,18 +1,17 @@
 import { useState, useCallback } from 'react';
-import { useAccount, useChainId, useSignTypedData } from 'wagmi';
-import { keccak256, encodePacked } from 'viem';
+import { useAccount, useChainId, usePublicClient, useWalletClient } from 'wagmi';
+import { keccak256, encodeAbiParameters, parseUnits, maxUint256 } from 'viem';
 import { OrderFormData } from '@/types/trading';
-import { OrderRequest, OrderData, TradeSubmitStep } from '@/types/order';
-import { submitOrder as apiSubmitOrder, submitCommitHash } from '@/services/api';
+import { OrderRequest, TradeSubmitStep } from '@/types/order';
+import { submitOrder as apiSubmitOrder } from '@/services/api';
 import { ApiError } from '@/utils/errors';
-import { EIP712_DOMAIN, ORDER_TYPES } from '@/config/eip712';
+import { ROUTER_ADDRESS, ROUTER_ABI, ERC20_ABI } from '@/config/contracts';
 
 const STEP_MESSAGES: Record<TradeSubmitStep, string> = {
   idle: '',
-  signing: 'Signing order…',
-  depositing: 'Preparing deposit…',
-  submitting_order: 'Submitting order…',
-  storing_commitment: 'Storing commitment…',
+  approving: 'Approving token spend\u2026',
+  committing: 'Depositing & committing order\u2026',
+  submitting_order: 'Submitting order to matching engine\u2026',
   complete: 'Complete!',
   error: 'Error',
 };
@@ -30,7 +29,8 @@ interface UseSubmitTradeReturn {
 export function useSubmitTrade(): UseSubmitTradeReturn {
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
-  const { signTypedDataAsync } = useSignTypedData();
+  const publicClient = usePublicClient();
+  const { data: walletClient } = useWalletClient();
 
   const [currentStep, setCurrentStep] = useState<TradeSubmitStep>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -51,95 +51,96 @@ export function useSubmitTrade(): UseSubmitTradeReturn {
       setSuccess(false);
       setCurrentStep('idle');
 
-      if (!isConnected || !address) {
+      if (!isConnected || !address || !walletClient || !publicClient) {
         setError('Wallet must be connected to submit an order');
         return;
       }
 
       try {
-        const variance_bps = Math.round(formData.slippage * 100);
-        const nonce = BigInt(Date.now()).toString();
+        const sellToken = formData.tokenPair.baseToken.address as `0x${string}`;
+        const buyToken = formData.tokenPair.quoteToken.address as `0x${string}`;
+        const sellAmount = parseUnits(formData.amount, formData.tokenPair.baseToken.decimals);
+        const varianceBps = Math.round(formData.slippage * 100);
 
-        const orderData: OrderData = {
-          user: address,
-          baseToken: formData.tokenPair.baseToken.address,
-          quoteToken: formData.tokenPair.quoteToken.address,
-          quantity: formData.amount,
-          price: formData.price,
-          varianceBps: variance_bps,
-          nonce,
-          chainId,
-          orderType: formData.orderType,
-        };
+        // Calculate minBuyAmount from price and slippage
+        const rawBuyAmount = parseUnits(
+          (parseFloat(formData.amount) * parseFloat(formData.price)).toString(),
+          formData.tokenPair.quoteToken.decimals
+        );
+        const minBuyAmount = rawBuyAmount - (rawBuyAmount * BigInt(varianceBps)) / 10000n;
 
-        // Step 1: Sign the order via EIP-712
-        setCurrentStep('signing');
-        const signature = await signTypedDataAsync({
-          domain: {
-            ...EIP712_DOMAIN,
-            chainId,
-          },
-          types: ORDER_TYPES,
-          primaryType: 'Order',
-          message: {
-            user: address,
-            baseToken: orderData.baseToken as `0x${string}`,
-            quoteToken: orderData.quoteToken as `0x${string}`,
-            quantity: BigInt(orderData.quantity),
-            price: BigInt(orderData.price),
-            varianceBps: BigInt(orderData.varianceBps),
-            nonce: BigInt(orderData.nonce),
-            chainId: BigInt(chainId),
-            orderType: orderData.orderType,
-          },
-        });
-
-        // Compute commitment hash matching DarkPool.sol's computeCommitmentHash
-        const commitmentHash = keccak256(
-          encodePacked(
-            ['address', 'address', 'address', 'uint256', 'uint256', 'uint256', 'uint256'],
-            [
-              address,
-              orderData.baseToken as `0x${string}`,
-              orderData.quoteToken as `0x${string}`,
-              BigInt(orderData.quantity),
-              BigInt(orderData.price),
-              BigInt(orderData.varianceBps),
-              BigInt(orderData.nonce),
-            ]
+        const expiresAt = BigInt(Math.floor(Date.now() / 1000) + 3600); // 1 hour
+        const orderId = keccak256(
+          encodeAbiParameters(
+            [{ type: 'address' }, { type: 'uint256' }, { type: 'uint256' }],
+            [address, sellAmount, expiresAt]
           )
         );
 
-        // Step 2: Deposit stub
-        setCurrentStep('depositing');
-        await depositStub(orderData);
+        // Compute commitment hash matching contract's keccak256(abi.encode(OrderDetails))
+        const orderHash = keccak256(
+          encodeAbiParameters(
+            [
+              { type: 'bytes32' },
+              { type: 'address' },
+              { type: 'address' },
+              { type: 'address' },
+              { type: 'uint256' },
+              { type: 'uint256' },
+              { type: 'uint256' },
+            ],
+            [orderId, address, sellToken, buyToken, sellAmount, minBuyAmount, expiresAt]
+          )
+        );
 
-        // Step 3: Submit order to backend
+        // Step 1: Check allowance and approve if needed
+        const allowance = await publicClient.readContract({
+          address: sellToken,
+          abi: ERC20_ABI,
+          functionName: 'allowance',
+          args: [address, ROUTER_ADDRESS],
+        });
+
+        if ((allowance as bigint) < sellAmount) {
+          setCurrentStep('approving');
+          const approveHash = await walletClient.writeContract({
+            address: sellToken,
+            abi: ERC20_ABI,
+            functionName: 'approve',
+            args: [ROUTER_ADDRESS, maxUint256],
+          });
+          await publicClient.waitForTransactionReceipt({ hash: approveHash });
+        }
+
+        // Step 2: Call depositAndCommit on-chain
+        setCurrentStep('committing');
+        const commitHash = await walletClient.writeContract({
+          address: ROUTER_ADDRESS,
+          abi: ROUTER_ABI,
+          functionName: 'depositAndCommit',
+          args: [sellToken, sellAmount, orderId, orderHash],
+        });
+        await publicClient.waitForTransactionReceipt({ hash: commitHash });
+
+        // Step 3: Submit order details to backend
         setCurrentStep('submitting_order');
         const orderRequest: OrderRequest = {
           user_address: address,
           chain_id: chainId,
           order_type: formData.orderType,
-          base_token: formData.tokenPair.baseToken.address,
-          quote_token: formData.tokenPair.quoteToken.address,
+          base_token: sellToken,
+          quote_token: buyToken,
           quantity: formData.amount,
           price: formData.price,
-          variance_bps,
-          order_signature: signature,
-          order_data: orderData,
-          commitment_hash: commitmentHash,
-          nonce,
+          variance_bps: varianceBps,
+          order_id: orderId,
+          commitment_hash: orderHash,
+          expires_at: Number(expiresAt),
+          min_buy_amount: minBuyAmount.toString(),
+          sell_amount: sellAmount.toString(),
         };
 
-        const orderResponse = await apiSubmitOrder(orderRequest);
-
-        // Step 4: Store commitment hash
-        setCurrentStep('storing_commitment');
-        await submitCommitHash({
-          order_id: orderResponse.order.id,
-          commitment_hash: commitmentHash,
-          user_address: address,
-        });
+        await apiSubmitOrder(orderRequest);
 
         setCurrentStep('complete');
         setSuccess(true);
@@ -155,7 +156,7 @@ export function useSubmitTrade(): UseSubmitTradeReturn {
         setSuccess(false);
       }
     },
-    [address, isConnected, chainId, signTypedDataAsync]
+    [address, isConnected, chainId, walletClient, publicClient]
   );
 
   return {
@@ -167,16 +168,4 @@ export function useSubmitTrade(): UseSubmitTradeReturn {
     submitTrade,
     reset,
   };
-}
-
-/**
- * Deposit stub — placeholder for future ERC20.approve() + custody transfer.
- * Currently just logs the intent and resolves immediately.
- */
-async function depositStub(orderData: OrderData): Promise<void> {
-  console.log('[depositStub] Deposit intent for order:', {
-    user: orderData.user,
-    baseToken: orderData.baseToken,
-    quantity: orderData.quantity,
-  });
 }

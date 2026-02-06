@@ -7,24 +7,11 @@ export type OrderStatus =
   | 'CANCELLED'
   | 'EXPIRED';
 
-export interface OrderData {
-  user: string;
-  baseToken: string;
-  quoteToken: string;
-  quantity: string;
-  price: string;
-  varianceBps: number;
-  nonce: string;
-  chainId: number;
-  orderType: OrderType;
-}
-
 export type TradeSubmitStep =
   | 'idle'
-  | 'signing'
-  | 'depositing'
+  | 'approving'
+  | 'committing'
   | 'submitting_order'
-  | 'storing_commitment'
   | 'complete'
   | 'error';
 
@@ -37,10 +24,11 @@ export interface OrderRequest {
   quantity: string;
   price: string;
   variance_bps: number;
-  order_signature?: string;
-  order_data?: OrderData;
-  commitment_hash?: string;
-  nonce?: string;
+  order_id: string;
+  commitment_hash: string;
+  expires_at: number;
+  min_buy_amount: string;
+  sell_amount: string;
 }
 
 export interface Order {
