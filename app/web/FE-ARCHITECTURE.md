@@ -2,411 +2,166 @@
 
 ## Overview
 
-The Dark Pool frontend is built with Next.js 14, featuring a stunning purple-themed UI with animated liquid pool effects and professional wallet connection functionality.
+The Dark Pool frontend is built with Next.js 14, featuring a purple-themed UI with animated liquid pool effects. Users connect their wallet, place orders (which commit on-chain), and view order/match history.
 
 ## Technology Stack
 
 ### Core Framework
 - **Next.js 14** - React framework with App Router
-- **React 18** - UI library with hooks and server components
-- **TypeScript** - Type safety and developer experience
+- **React 18** - UI library with hooks
+- **TypeScript** - Type safety
 
-### Wallet Integration
-- **wagmi v2** - React hooks for Ethereum
-  - Type-safe, composable hooks
-  - Built-in caching and state management
-  - Multi-chain support
-- **viem** - TypeScript Ethereum library
-  - Modern replacement for ethers.js
-  - Tree-shakeable, performant
-- **RainbowKit v2** - Pre-built wallet UI
-  - Support for MetaMask, WalletConnect, Coinbase
-  - Beautiful, customizable modals
-  - Mobile-optimized with WalletConnect
-- **TanStack Query v5** - State management
-  - Required by wagmi
-  - Handles caching, deduplication, background updates
+### Wallet + Contract Integration
+- **wagmi v2** - React hooks for Ethereum (useAccount, useWalletClient, usePublicClient)
+- **viem** - TypeScript Ethereum library (keccak256, encodeAbiParameters, parseUnits)
+- **RainbowKit v2** - Pre-built wallet UI (MetaMask, WalletConnect, Coinbase)
+- **TanStack Query v5** - State management (required by wagmi)
 
 ### Animations
-- **Framer Motion v11** - Animation library
-  - Declarative API
-  - GPU-accelerated transforms
-  - SVG path animations
-- **CSS Keyframes** - Simple looping animations
-  - `liquidFloat` - Blob movement
-  - `pulseGlow` - Glow pulsing
+- **Framer Motion v11** - Component animations, SVG path animations
+- **CSS Keyframes** - `liquidFloat` (blob movement), `pulseGlow` (glow pulsing)
 
 ### Styling
-- **Tailwind CSS v3** - Utility-first CSS
-  - Custom purple color palette
-  - Responsive design utilities
-  - Dark theme optimized
+- **Tailwind CSS v3** - Utility-first CSS with custom purple palette
 
 ## Folder Structure
 
 ```
 src/
 ├── app/
-│   ├── layout.tsx          # Root layout with providers
-│   ├── page.tsx            # Home page with wallet UI
-│   └── globals.css         # Global styles and animations
+│   ├── layout.tsx              # Root layout with providers
+│   ├── page.tsx                # Home page
+│   └── globals.css             # Global styles and animations
 │
 ├── components/
+│   ├── trading/
+│   │   ├── OrderForm.tsx       # Order creation form
+│   │   ├── TradeModal.tsx      # Trade confirmation modal
+│   │   ├── OrderCard.tsx       # Single order display
+│   │   ├── MatchCard.tsx       # Single match display
+│   │   ├── OrdersDrawer.tsx    # Orders/matches side panel
+│   │   ├── OrdersDrawerToggle.tsx
+│   │   ├── OrderTypeToggle.tsx # BUY/SELL toggle
+│   │   ├── SlippageInput.tsx   # Slippage tolerance input
+│   │   └── TokenPairSelector.tsx
+│   │
 │   ├── wallet/
-│   │   ├── ConnectWallet.tsx    # Disconnected state UI
-│   │   └── WalletButton.tsx     # Connected state UI
+│   │   ├── ConnectWallet.tsx   # Disconnected state UI
+│   │   └── WalletButton.tsx    # Connected state UI
 │   │
 │   ├── animations/
-│   │   ├── PoolBackground.tsx   # Liquid background blobs
-│   │   └── GlowOrb.tsx          # Floating purple orbs
+│   │   ├── PoolBackground.tsx  # Liquid background blobs
+│   │   └── GlowOrb.tsx        # Floating purple orbs
 │   │
 │   └── ui/
-│       ├── Logo.tsx             # Dark Pool logo component
-│       └── Container.tsx        # Layout container
-│
-├── providers/
-│   └── WagmiProvider.tsx        # Wallet provider setup
+│       ├── Logo.tsx            # Dark Pool logo
+│       ├── Container.tsx       # Layout container
+│       └── Modal.tsx           # Reusable modal wrapper
 │
 ├── hooks/
-│   └── useWalletConnection.ts   # Wallet logic abstraction
+│   ├── useSubmitTrade.ts       # Core trade flow: approve → commit → submit
+│   ├── useTradeModal.ts        # Trade modal state management
+│   ├── useUserOrders.ts        # Fetch user's orders from API
+│   ├── useUserMatches.ts       # Fetch user's matches from API
+│   └── useWalletConnection.ts  # Wallet state abstraction
 │
 ├── config/
 │   ├── chains.ts               # Supported chains config
+│   ├── contracts.ts            # Router address, Router ABI, ERC20 ABI
+│   ├── tokens.ts               # Token list and pairs
 │   └── wagmi.ts                # Wagmi/RainbowKit config
 │
-└── types/
-    └── wallet.ts               # TypeScript types
+├── services/
+│   └── api.ts                  # API client (submitOrder, fetchUserOrders, fetchUserMatches)
+│
+├── types/
+│   ├── order.ts                # OrderRequest, Order, Match, TradeSubmitStep
+│   ├── trading.ts              # OrderFormData, TokenPair
+│   └── wallet.ts               # Wallet types
+│
+└── utils/
+    ├── errors.ts               # ApiError class
+    ├── tokens.ts               # Token utilities
+    └── validation.ts           # Form validation
 ```
 
-## Component Patterns
+## Core Hook: useSubmitTrade
 
-### Hooks + Presentation Pattern
-We follow the hooks + presentation component pattern:
+The main trade submission hook handles the entire flow without EIP-712 signatures:
 
-1. **Custom Hooks** - Encapsulate logic
-   - `useWalletConnection()` - Abstracts wallet state
-   - Wagmi hooks (`useAccount`, `useDisconnect`, etc.)
+```
+idle → approving → committing → submitting_order → complete
+                                                  → error
+```
 
-2. **Presentation Components** - Render UI
-   - Receive data from hooks
-   - Handle user interactions
-   - No direct blockchain logic
+**Steps:**
+1. **approving** — Check ERC20 allowance, call `approve(router, MaxUint256)` if needed (first time only)
+2. **committing** — Call `depositAndCommit(token, amount, orderId, orderHash)` on DarkPoolRouter
+3. **submitting_order** — POST order details to backend API
 
-**Example:**
+**Order hash computation** (must match contract's `keccak256(abi.encode(OrderDetails))`):
 ```typescript
-// Hook (logic)
-export function useWalletConnection() {
-  const { address, isConnected } = useAccount();
-  return { address, isConnected, ... };
-}
-
-// Component (presentation)
-export function WalletButton() {
-  const { isConnected } = useWalletConnection();
-  return <button>...</button>;
-}
+const orderHash = keccak256(
+  encodeAbiParameters(
+    [{ type: 'bytes32' }, { type: 'address' }, { type: 'address' },
+     { type: 'address' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }],
+    [orderId, userAddress, sellToken, buyToken, sellAmount, minBuyAmount, expiresAt]
+  )
+);
 ```
 
-## State Management Strategy
+## Contract Config (config/contracts.ts)
 
-### Wallet State
-- **Managed by:** wagmi + TanStack Query
-- **No custom state needed**
-- Automatic caching, revalidation, optimistic updates
+Contains minimal ABIs for frontend contract interaction:
+- `ROUTER_ADDRESS` — from `NEXT_PUBLIC_ROUTER_ADDRESS` env var
+- `ROUTER_ABI` — `depositAndCommit`, `commitOnly`, `cancel`, `commitments` (read)
+- `ERC20_ABI` — `allowance` (read), `approve`
 
-### Why No Redux/Zustand?
-- wagmi handles all wallet state
-- No complex app state yet (order book will need this later)
-- Keep it simple until needed
+## API Client (services/api.ts)
 
-### When to Add State Management
-Add Zustand when implementing:
-- Order book real-time updates
-- Trade history caching
-- User preferences/settings
-- Complex form state
+All requests include timeout handling (10s) and structured error handling via `ApiError`.
 
-## Animation Strategy
+| Function | Endpoint | Purpose |
+|----------|----------|---------|
+| `submitOrder` | `POST /api/orders` | Submit order after on-chain commit |
+| `fetchUserOrders` | `GET /api/orders/user/:address` | Get user's orders |
+| `fetchUserMatches` | `GET /api/orders/matches/user/:address` | Get user's matches |
+| `fetchOrderById` | `GET /api/orders/:id` | Get single order |
 
-### CSS Keyframes
-Used for simple, looping animations:
-- `liquidFloat` - Background blob movement
-- `pulseGlow` - Glow effect pulsing
+## State Management
 
-**Pros:**
-- Performant (GPU-accelerated)
-- No JavaScript overhead
-- Perfect for infinite loops
+- **Wallet state** — managed by wagmi + TanStack Query
+- **Trade submission state** — managed by `useSubmitTrade` hook (step, error, loading)
+- **Modal state** — managed by `useTradeModal` hook
+- **No Redux/Zustand** — not needed yet. Add when implementing real-time order book updates.
 
-### Framer Motion
-Used for complex, interactive animations:
-- Component entrance/exit
-- SVG path animations
-- User-triggered animations
+## Environment Variables
 
-**Pros:**
-- Declarative API
-- Easy orchestration
-- Great SVG support
+| Variable | Purpose |
+|----------|---------|
+| `NEXT_PUBLIC_API_URL` | Backend API URL (default: `http://localhost:3001`) |
+| `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | WalletConnect project ID |
+| `NEXT_PUBLIC_DEFAULT_CHAIN_ID` | Default chain (default: `1`) |
+| `NEXT_PUBLIC_ROUTER_ADDRESS` | DarkPoolRouter contract address |
 
-### Performance Considerations
-1. **GPU Acceleration**
-   - Only animate `transform` and `opacity`
-   - Use `will-change` sparingly
+## Development
 
-2. **Reduced Motion**
-   - Respect `prefers-reduced-motion` media query
-   - Disable animations for accessibility
-
-3. **Animation Throttling**
-   - 60fps target on desktop
-   - 30fps acceptable on mobile
-   - Reduce blob count on low-end devices
-
-## Styling Guidelines
-
-### Purple Theme
-Three color families:
-
-1. **Dark Palette** - Backgrounds
-   - `dark-bg`: #0a0014 (deep space purple/black)
-   - `dark-surface`: #1a0b2e (dark purple surface)
-   - `dark-elevated`: #2d1b4e (elevated cards)
-
-2. **Purple Palette** - Accents
-   - `purple-primary`: #7c3aed (vibrant purple)
-   - `purple-secondary`: #a78bfa (light purple)
-   - `purple-accent`: #c084fc (pink-purple)
-   - `purple-glow`: #9333ea (glow effects)
-
-3. **Pool Palette** - Liquids
-   - `pool-light`: #e9d5ff (light liquid)
-   - `pool-medium`: #c084fc (medium liquid)
-   - `pool-dark`: #7c3aed (dark liquid)
-
-### Glass Morphism Pattern
-```css
-bg-dark-surface/30 backdrop-blur-xl border border-purple-primary/20
-```
-
-### Glow Effects
-```css
-shadow-[0_0_50px_rgba(147,51,234,0.5)]
-```
-
-### Responsive Breakpoints
-- Mobile: `< 640px` (sm)
-- Tablet: `640px - 1024px` (md, lg)
-- Desktop: `> 1024px` (xl, 2xl)
-
-## Modals Architecture (Future)
-
-When implementing order forms, trade modals, etc:
-
-### Pattern
-1. **State:** Zustand store for modal state
-2. **Component:** Framer Motion for animations
-3. **Portal:** Render outside main tree
-4. **Accessibility:** Focus trap, ESC to close, aria-modal
-
-### Example Structure
-```
-src/components/modals/
-├── OrderFormModal.tsx
-├── TradeConfirmModal.tsx
-└── SettingsModal.tsx
-```
-
-## Hooks Documentation
-
-### useWalletConnection
-Abstracts wallet logic into reusable hook.
-
-**Returns:**
-```typescript
-{
-  address: string | undefined;
-  isConnected: boolean;
-  isConnecting: boolean;
-  chainId: number | undefined;
-  truncatedAddress: string; // "0x1234...5678"
-  disconnect: () => void;
-  connect: () => void;
-}
-```
-
-**Usage:**
-```typescript
-const { isConnected, address } = useWalletConnection();
-```
-
-## Performance Considerations
-
-### Bundle Size
-- Tree-shake unused dependencies
-- Dynamic imports for heavy components
-- Monitor bundle with `@next/bundle-analyzer`
-
-### Runtime Performance
-- Memoize expensive calculations
-- Use React.memo for stable components
-- Lazy load animations on mobile
-
-### Network Requests
-- wagmi handles caching automatically
-- Use stale-while-revalidate pattern
-- Minimize RPC calls
-
-## Security
-
-### Wallet Connection
-- Never request private keys (RainbowKit handles this)
-- Only read wallet address and signatures
-- No sensitive data in localStorage
-
-### Environment Variables
-- Prefix public vars with `NEXT_PUBLIC_`
-- Never expose private keys
-- WalletConnect project ID is public (safe)
-
-### HTTPS Required
-- WalletConnect requires HTTPS in production
-- Use Vercel/Netlify for automatic HTTPS
-
-## Accessibility
-
-### Keyboard Navigation
-- All interactive elements focusable
-- Logical tab order
-- Visible focus indicators
-
-### Screen Readers
-- Semantic HTML
-- ARIA labels on icon buttons
-- Announcements for state changes
-
-### Color Contrast
-- WCAG AA minimum (4.5:1 for text)
-- Purple on dark backgrounds tested
-- High contrast mode support
-
-## Future Enhancements
-
-### Short Term
-1. ENS name resolution
-2. Token balance display
-3. Network switching UI
-4. Transaction notifications
-
-### Medium Term
-1. Order form integration
-2. Order book display
-3. Trade history
-4. Portfolio view
-
-### Long Term
-1. Advanced charting
-2. Analytics dashboard
-3. Mobile app (React Native)
-4. Desktop app (Tauri)
-
-## Development Workflow
-
-### Getting Started
 ```bash
 cd app/web
 npm install
-npm run dev
-```
-
-### Building
-```bash
+npm run dev       # http://localhost:3000
 npm run build
-npm start
-```
-
-### Testing
-```bash
-# Manual testing checklist in TODO.md
-# Automated tests: TODO (Jest + React Testing Library)
-```
-
-### Linting
-```bash
 npm run lint
 ```
 
-## Troubleshooting
+## Docker
 
-### Common Issues
-
-1. **"WalletConnect project ID required"**
-   - Get free ID at https://cloud.walletconnect.com/
-   - Add to `.env.local`
-
-2. **"Animations are janky"**
-   - Check FPS in Chrome DevTools
-   - Reduce number of GlowOrb components
-   - Lower blob count in PoolBackground
-
-3. **"Wallet not connecting"**
-   - Check browser extension installed
-   - Verify network configuration
-   - Clear browser cache
-
-## Contributing
-
-### Code Style
-- Use TypeScript for type safety
-- Follow existing component patterns
-- Comment complex logic
-- Keep components focused (single responsibility)
-
-### Git Workflow
-- Feature branches from `main`
-- Descriptive commit messages
-- Test before pushing
-
-### Documentation
-- Update TODO.md when adding features
-- Update this file for architectural changes
-- Add JSDoc comments to hooks/utils
-
-## Docker Deployment
-
-### Prerequisites
-1. Get a free WalletConnect project ID from https://cloud.walletconnect.com/
-2. Create a `.env` file at the project root (copy from `.env.example`)
-3. Set `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` in the `.env` file
-
-### Building with Docker Compose
 ```bash
 # From project root
-docker-compose build frontend
+docker-compose up frontend
 
-# Or build and run all services
-docker-compose up --build
+# Or build directly
+docker build --build-arg NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=your_id -t darkpool-frontend app/web
 ```
 
-### Building Frontend Container Directly
-```bash
-# From app/web directory
-docker build \
-  --build-arg NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=your_project_id \
-  --build-arg NEXT_PUBLIC_DEFAULT_CHAIN_ID=1 \
-  -t darkpool-frontend .
-```
-
-### Important Notes
-- `NEXT_PUBLIC_*` environment variables are inlined at build time
-- You must provide the WalletConnect project ID during build
-- Rebuilding is required if you change the project ID
-- The Dockerfile uses multi-stage builds for optimized image size
-
-## Resources
-
-- [wagmi Documentation](https://wagmi.sh/)
-- [RainbowKit Documentation](https://www.rainbowkit.com/)
-- [Framer Motion Documentation](https://www.framer.com/motion/)
-- [Next.js Documentation](https://nextjs.org/docs)
-- [Tailwind CSS Documentation](https://tailwindcss.com/docs)
+Note: `NEXT_PUBLIC_*` variables are inlined at build time — rebuild required if changed.

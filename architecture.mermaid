@@ -4,30 +4,35 @@ flowchart TB
         UB[User B Wallet]
     end
 
-    subgraph Frontend["React Frontend"]
-        OrderUI[Order Form + Wallet Signing]
+    subgraph Frontend["Next.js Frontend"]
+        OrderUI[Order Form]
         Status[Order Status / WebSocket Feed]
     end
 
     subgraph Backend["Node.js Backend"]
         API[REST API]
-        OrderBook[Order Book]
-        Matcher[Matching Engine]
-        DB[(PostgreSQL<br/>Orders + Signatures)]
-        YellowSDK[Yellow SDK Client]
+        Verifier[Commitment Verifier<br/>reads on-chain hash via RPC]
+        DB[(PostgreSQL<br/>Orders + Matches)]
+        WS[WebSocket Server]
     end
 
-    subgraph YourContract["Your External Contract"]
-        Commit[commitOrder<br/>stores keccak256 hash]
-        Reveal[revealAndMatch<br/>verifies hash matches payload]
-        Hashes[(Hash Storage)]
+    subgraph Warlock["Warlock Matching Engine (Go)"]
+        GRPC[gRPC Server]
+        Matcher[Order Matching]
+    end
+
+    subgraph DarkPoolRouter["DarkPoolRouter Contract"]
+        Commit[depositAndCommit / commitOnly<br/>stores keccak256 hash]
+        Reveal[revealAndSettle<br/>verifies hash + constraints]
+        Settle[markFullySettled]
+        Hashes[(Commitment Storage)]
     end
 
     subgraph Yellow["Yellow Network"]
         subgraph OnChain["On-Chain"]
-            Custody[Custody Contract<br/>deposit/create/resize/close]
+            Custody[Custody Contract<br/>deposit / withdraw]
         end
-        
+
         subgraph OffChain["Off-Chain"]
             Clearnode[Clearnode]
             ChannelA[State Channel<br/>User A ↔ Clearnode]
@@ -36,27 +41,40 @@ flowchart TB
         end
     end
 
-    %% User flows
+    %% User → Frontend
     UA & UB --> OrderUI
-    OrderUI --> API
     Status --> UA & UB
 
-    %% Backend flows
-    API --> DB
-    API --> OrderBook
-    OrderBook --> Matcher
-    Matcher --> YellowSDK
-
-    %% Commit-reveal flows
-    API -->|1. commit hash| Commit
+    %% User → Contract (approve + depositAndCommit)
+    UA -->|1. approve + depositAndCommit| Commit
+    UB -->|1. approve + depositAndCommit| Commit
     Commit --> Hashes
-    Matcher -->|2. reveal on match| Reveal
-    Reveal -->|verify| Hashes
+    Commit -->|deposit tokens| Custody
 
-    %% Yellow flows
-    YellowSDK -->|3. create app session| Clearnode
-    UA -->|initial deposit| Custody
-    UB -->|initial deposit| Custody
+    %% Frontend → Backend (submit order details)
+    OrderUI -->|2. POST /api/orders| API
+
+    %% Backend verifies on-chain commitment
+    API --> Verifier
+    Verifier -->|read commitment hash| Hashes
+
+    %% Backend → Warlock (forward verified order)
+    API -->|3. gRPC submitOrder| GRPC
+    GRPC --> Matcher
+    API --> DB
+
+    %% Match found → settlement
+    Matcher -->|4. match found| Reveal
+    Reveal -->|verify hashes + constraints| Hashes
+
+    %% Yellow settlement
+    Matcher -->|5. create app session| Clearnode
     Clearnode --> ChannelA & ChannelB
-    ChannelA & ChannelB -->|4. allocate to session| AppSession
-    AppSession -->|5. P2P settlement| Clearnode
+    ChannelA & ChannelB -->|6. allocate to session| AppSession
+    AppSession -->|7. P2P settlement| Clearnode
+
+    %% Finalize
+    Clearnode -->|8. settlement complete| Settle
+
+    %% WebSocket notifications
+    WS --> Status
