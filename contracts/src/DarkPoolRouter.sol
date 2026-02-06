@@ -3,11 +3,9 @@ pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
-import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "./interfaces/IYellowCustody.sol";
 
-contract DarkPoolRouter is EIP712 {
+contract DarkPoolRouter {
     using SafeERC20 for IERC20;
 
     // ============ STATE ============
@@ -40,12 +38,7 @@ contract DarkPoolRouter is EIP712 {
         uint256 sellAmount;
         uint256 minBuyAmount;
         uint256 expiresAt;
-        bytes signature;
     }
-
-    bytes32 public constant ORDER_TYPEHASH = keccak256(
-        "Order(bytes32 orderId,address sellToken,address buyToken,uint256 sellAmount,uint256 minBuyAmount,uint256 expiresAt)"
-    );
 
     // ============ EVENTS ============
 
@@ -56,7 +49,7 @@ contract DarkPoolRouter is EIP712 {
 
     // ============ CONSTRUCTOR ============
 
-    constructor(address _custody, address _engine) EIP712("DarkPool", "1") {
+    constructor(address _custody, address _engine) {
         custody = IYellowCustody(_custody);
         engine = _engine;
     }
@@ -124,10 +117,6 @@ contract DarkPoolRouter is EIP712 {
         require(keccak256(abi.encode(seller)) == sellerC.orderHash, "Seller hash mismatch");
         require(keccak256(abi.encode(buyer)) == buyerC.orderHash, "Buyer hash mismatch");
 
-        // Verify signatures
-        require(_verifySignature(seller), "Invalid seller signature");
-        require(_verifySignature(buyer), "Invalid buyer signature");
-
         // Verify not expired
         require(block.timestamp < seller.expiresAt, "Seller expired");
         require(block.timestamp < buyer.expiresAt, "Buyer expired");
@@ -159,24 +148,4 @@ contract DarkPoolRouter is EIP712 {
         emit OrdersSettled(sellerOrderId, buyerOrderId);
     }
 
-    // ============ INTERNAL ============
-
-    function _verifySignature(OrderDetails calldata order) internal view returns (bool) {
-        bytes32 structHash = keccak256(
-            abi.encode(
-                ORDER_TYPEHASH,
-                order.orderId,
-                order.sellToken,
-                order.buyToken,
-                order.sellAmount,
-                order.minBuyAmount,
-                order.expiresAt
-            )
-        );
-
-        bytes32 digest = _hashTypedDataV4(structHash);
-        address signer = ECDSA.recover(digest, order.signature);
-
-        return signer == order.user;
-    }
 }
