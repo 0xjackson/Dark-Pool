@@ -84,8 +84,6 @@ app.get('/health', async (req, res) => {
 // API Routes
 app.use('/api/orders', ordersRouter);
 
-// Convenience route for matches (also available at /api/orders/matches/...)
-app.use('/api/matches', ordersRouter);
 
 // Initialize WebSocket server
 const wsServer = new DarkPoolWebSocketServer(server);

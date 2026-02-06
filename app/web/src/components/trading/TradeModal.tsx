@@ -1,12 +1,12 @@
 'use client';
 
-import { useState, useCallback } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { OrderForm } from './OrderForm';
 
 interface TradeModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onOrderSuccess?: () => void;
 }
 
 /**
@@ -17,28 +17,14 @@ interface TradeModalProps {
  * - OrderForm component for the form logic
  *
  * Features:
- * - Auto-closes modal 2-3 seconds after successful order submission
  * - Success feedback handled by OrderForm component
- * - Clean separation of concerns
+ * - User manually closes modal via X button or backdrop click
+ * - Triggers callback on successful order submission for external state updates
  */
-export function TradeModal({ isOpen, onClose }: TradeModalProps) {
-  const [isClosing, setIsClosing] = useState(false);
-
-  const handleSuccess = useCallback(() => {
-    // Set closing state to prevent multiple triggers
-    if (isClosing) return;
-    setIsClosing(true);
-
-    // Close modal after 2.5 seconds to allow user to see success message
-    setTimeout(() => {
-      onClose();
-      setIsClosing(false);
-    }, 2500);
-  }, [isClosing, onClose]);
-
+export function TradeModal({ isOpen, onClose, onOrderSuccess }: TradeModalProps) {
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Submit Order">
-      <OrderForm onSuccess={handleSuccess} />
+      <OrderForm onSuccess={onOrderSuccess} />
     </Modal>
   );
 }

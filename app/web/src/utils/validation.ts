@@ -1,4 +1,4 @@
-import { TradingPair, OrderFormData } from '../types';
+import { TradingPair, OrderFormData } from '../types/trading';
 
 /**
  * Validates the amount field

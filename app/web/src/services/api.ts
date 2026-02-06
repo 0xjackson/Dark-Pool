@@ -1,4 +1,4 @@
-import { OrderRequest, OrderResponse } from '@/types/order';
+import { OrderRequest, OrderResponse, Order, Match, OrderStatus } from '@/types/order';
 import { ApiError, createApiErrorFromResponse } from '@/utils/errors';
 
 /**
@@ -108,6 +108,160 @@ export async function submitOrder(orderRequest: OrderRequest): Promise<OrderResp
 
     // Fallback for unknown errors
     throw new ApiError('An unexpected error occurred while submitting the order', 500, {
+      type: 'unknown',
+      error: String(error),
+    });
+  }
+}
+
+/**
+ * Fetches orders for a specific user address
+ * @param address - User's wallet address
+ * @param status - Optional filter by order status
+ * @param limit - Maximum number of orders to return (default: 50)
+ * @param offset - Pagination offset (default: 0)
+ * @returns Promise resolving to array of orders
+ * @throws ApiError on failure
+ */
+export async function fetchUserOrders(
+  address: string,
+  status?: OrderStatus,
+  limit: number = 50,
+  offset: number = 0
+): Promise<Order[]> {
+  const params = new URLSearchParams({
+    limit: limit.toString(),
+    offset: offset.toString(),
+  });
+
+  if (status) {
+    params.append('status', status);
+  }
+
+  const url = `${API_BASE_URL}/api/orders/user/${address}?${params.toString()}`;
+
+  try {
+    const response = await fetchWithTimeout(url, { method: 'GET' }, DEFAULT_TIMEOUT);
+
+    if (!response.ok) {
+      throw await createApiErrorFromResponse(response, 'Failed to fetch user orders');
+    }
+
+    const data = await response.json();
+    return data.orders || [];
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+
+    if (error instanceof TimeoutError) {
+      throw new ApiError(error.message, 408, { type: 'timeout' });
+    }
+
+    if (error instanceof TypeError || error instanceof Error) {
+      throw new ApiError(
+        error.message || 'Network request failed',
+        0,
+        { type: 'network', originalError: error.message }
+      );
+    }
+
+    throw new ApiError('An unexpected error occurred while fetching orders', 500, {
+      type: 'unknown',
+      error: String(error),
+    });
+  }
+}
+
+/**
+ * Fetches matches for a specific user address
+ * @param address - User's wallet address
+ * @param limit - Maximum number of matches to return (default: 50)
+ * @param offset - Pagination offset (default: 0)
+ * @returns Promise resolving to array of matches
+ * @throws ApiError on failure
+ */
+export async function fetchUserMatches(
+  address: string,
+  limit: number = 50,
+  offset: number = 0
+): Promise<Match[]> {
+  const params = new URLSearchParams({
+    limit: limit.toString(),
+    offset: offset.toString(),
+  });
+
+  const url = `${API_BASE_URL}/api/orders/matches/user/${address}?${params.toString()}`;
+
+  try {
+    const response = await fetchWithTimeout(url, { method: 'GET' }, DEFAULT_TIMEOUT);
+
+    if (!response.ok) {
+      throw await createApiErrorFromResponse(response, 'Failed to fetch user matches');
+    }
+
+    const data = await response.json();
+    return data.matches || [];
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+
+    if (error instanceof TimeoutError) {
+      throw new ApiError(error.message, 408, { type: 'timeout' });
+    }
+
+    if (error instanceof TypeError || error instanceof Error) {
+      throw new ApiError(
+        error.message || 'Network request failed',
+        0,
+        { type: 'network', originalError: error.message }
+      );
+    }
+
+    throw new ApiError('An unexpected error occurred while fetching matches', 500, {
+      type: 'unknown',
+      error: String(error),
+    });
+  }
+}
+
+/**
+ * Fetches a single order by ID
+ * @param orderId - The order ID
+ * @returns Promise resolving to the order
+ * @throws ApiError on failure
+ */
+export async function fetchOrderById(orderId: string): Promise<Order> {
+  const url = `${API_BASE_URL}/api/orders/${orderId}`;
+
+  try {
+    const response = await fetchWithTimeout(url, { method: 'GET' }, DEFAULT_TIMEOUT);
+
+    if (!response.ok) {
+      throw await createApiErrorFromResponse(response, 'Failed to fetch order');
+    }
+
+    const data = await response.json();
+    return data.order;
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+
+    if (error instanceof TimeoutError) {
+      throw new ApiError(error.message, 408, { type: 'timeout' });
+    }
+
+    if (error instanceof TypeError || error instanceof Error) {
+      throw new ApiError(
+        error.message || 'Network request failed',
+        0,
+        { type: 'network', originalError: error.message }
+      );
+    }
+
+    throw new ApiError('An unexpected error occurred while fetching order', 500, {
       type: 'unknown',
       error: String(error),
     });

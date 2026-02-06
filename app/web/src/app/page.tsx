@@ -13,7 +13,7 @@ export default function Home() {
   const { isConnected } = useWalletConnection();
 
   return (
-    <main className="h-screen bg-gradient-to-br from-dark-bg via-dark-surface to-dark-elevated overflow-hidden flex flex-col">
+    <main className="relative h-screen bg-gradient-to-br from-dark-bg via-dark-surface to-dark-elevated overflow-hidden flex flex-col">
       {/* Animated Background */}
       <PoolBackground />
 

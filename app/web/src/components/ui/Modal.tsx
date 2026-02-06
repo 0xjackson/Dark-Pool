@@ -23,19 +23,6 @@ interface ModalProps {
  * - X button to close
  */
 export function Modal({ isOpen, onClose, children, title }: ModalProps) {
-  // Prevent body scroll when modal is open
-  useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = 'unset';
-    }
-
-    return () => {
-      document.body.style.overflow = 'unset';
-    };
-  }, [isOpen]);
-
   // ESC key listener
   useEffect(() => {
     const handleEscape = (event: KeyboardEvent) => {

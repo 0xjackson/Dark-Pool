@@ -109,38 +109,6 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/orders/:id - Get order by ID
- */
-router.get('/:id', async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-
-    const result = await db.query(
-      `SELECT
-        id, user_address, chain_id, order_type, base_token, quote_token,
-        quantity, price, variance_bps, min_price, max_price,
-        filled_quantity, remaining_quantity, status,
-        created_at, expires_at
-      FROM orders
-      WHERE id = $1`,
-      [id]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Order not found' });
-    }
-
-    res.json(result.rows[0]);
-  } catch (error: any) {
-    console.error('Error fetching order:', error);
-    res.status(500).json({
-      error: 'Failed to fetch order',
-      message: error.message,
-    });
-  }
-});
-
-/**
  * GET /api/orders/user/:address - Get all orders for a user
  */
 router.get('/user/:address', async (req: Request, res: Response) => {
@@ -153,7 +121,7 @@ router.get('/user/:address', async (req: Request, res: Response) => {
         id, user_address, chain_id, order_type, base_token, quote_token,
         quantity, price, variance_bps, min_price, max_price,
         filled_quantity, remaining_quantity, status,
-        created_at, expires_at
+        created_at, updated_at, expires_at
       FROM orders
       WHERE user_address = $1
     `;
@@ -180,57 +148,6 @@ router.get('/user/:address', async (req: Request, res: Response) => {
     console.error('Error fetching user orders:', error);
     res.status(500).json({
       error: 'Failed to fetch orders',
-      message: error.message,
-    });
-  }
-});
-
-/**
- * DELETE /api/orders/:id - Cancel an order
- */
-router.delete('/:id', async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-    const { user_address } = req.body;
-
-    if (!user_address) {
-      return res.status(400).json({ error: 'user_address is required' });
-    }
-
-    // Cancel order via Warlock
-    const warlockClient = getWarlockClient();
-    const result = await warlockClient.cancelOrder(id, user_address);
-
-    res.json(result);
-  } catch (error: any) {
-    console.error('Error cancelling order:', error);
-    res.status(500).json({
-      error: 'Failed to cancel order',
-      message: error.message,
-    });
-  }
-});
-
-/**
- * GET /api/orderbook/:base/:quote - Get order book for token pair
- */
-router.get('/orderbook/:base/:quote', async (req: Request, res: Response) => {
-  try {
-    const { base, quote } = req.params;
-    const { depth = 20 } = req.query;
-
-    const warlockClient = getWarlockClient();
-    const orderBook = await warlockClient.getOrderBook(
-      base,
-      quote,
-      parseInt(depth as string)
-    );
-
-    res.json(orderBook);
-  } catch (error: any) {
-    console.error('Error fetching order book:', error);
-    res.status(500).json({
-      error: 'Failed to fetch order book',
       message: error.message,
     });
   }
@@ -270,6 +187,91 @@ router.get('/matches/user/:address', async (req: Request, res: Response) => {
     console.error('Error fetching matches:', error);
     res.status(500).json({
       error: 'Failed to fetch matches',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/orderbook/:base/:quote - Get order book for token pair
+ */
+router.get('/orderbook/:base/:quote', async (req: Request, res: Response) => {
+  try {
+    const { base, quote } = req.params;
+    const { depth = 20 } = req.query;
+
+    const warlockClient = getWarlockClient();
+    const orderBook = await warlockClient.getOrderBook(
+      base,
+      quote,
+      parseInt(depth as string)
+    );
+
+    res.json(orderBook);
+  } catch (error: any) {
+    console.error('Error fetching order book:', error);
+    res.status(500).json({
+      error: 'Failed to fetch order book',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * DELETE /api/orders/:id - Cancel an order
+ */
+router.delete('/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { user_address } = req.body;
+
+    if (!user_address) {
+      return res.status(400).json({ error: 'user_address is required' });
+    }
+
+    // Cancel order via Warlock
+    const warlockClient = getWarlockClient();
+    const result = await warlockClient.cancelOrder(id, user_address);
+
+    res.json(result);
+  } catch (error: any) {
+    console.error('Error cancelling order:', error);
+    res.status(500).json({
+      error: 'Failed to cancel order',
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * GET /api/orders/:id - Get order by ID
+ * IMPORTANT: This route must come AFTER all specific routes like /user/:address
+ * to avoid matching specific paths as IDs
+ */
+router.get('/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    const result = await db.query(
+      `SELECT
+        id, user_address, chain_id, order_type, base_token, quote_token,
+        quantity, price, variance_bps, min_price, max_price,
+        filled_quantity, remaining_quantity, status,
+        created_at, updated_at, expires_at
+      FROM orders
+      WHERE id = $1`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error: any) {
+    console.error('Error fetching order:', error);
+    res.status(500).json({
+      error: 'Failed to fetch order',
       message: error.message,
     });
   }

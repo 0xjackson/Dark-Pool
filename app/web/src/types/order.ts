@@ -40,3 +40,20 @@ export interface OrderResponse {
   order: Order;
   immediate_matches: any[];
 }
+
+export type SettlementStatus = 'PENDING' | 'SETTLED';
+
+export interface Match {
+  id: string;
+  buy_order_id: string;
+  sell_order_id: string;
+  base_token: string;
+  quote_token: string;
+  quantity: string;
+  price: string;
+  settlement_status: SettlementStatus;
+  matched_at: string;
+  settled_at: string | null;
+  buyer_address?: string;
+  seller_address?: string;
+}
