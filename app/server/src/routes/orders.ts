@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { getWarlockClient } from '../services/warlockClient';
+import { verifyCommitment } from '../services/commitmentVerifier';
 import { Pool } from 'pg';
 
 const router = Router();
@@ -13,6 +14,10 @@ export function setDatabase(pool: Pool) {
 
 /**
  * POST /api/orders - Create and submit a new order
+ *
+ * The user must have already called depositAndCommit() on-chain.
+ * This endpoint verifies the on-chain commitment hash matches the
+ * submitted order details before forwarding to the matching engine.
  */
 router.post('/', async (req: Request, res: Response) => {
   try {
@@ -25,10 +30,11 @@ router.post('/', async (req: Request, res: Response) => {
       quantity,
       price,
       variance_bps,
-      expires_in_seconds,
-      order_signature,
-      order_data,
+      order_id,
       commitment_hash,
+      expires_at,
+      min_buy_amount,
+      sell_amount,
     } = req.body;
 
     // Validate required fields
@@ -39,18 +45,19 @@ router.post('/', async (req: Request, res: Response) => {
       !base_token ||
       !quote_token ||
       !quantity ||
-      !price
+      !price ||
+      !order_id ||
+      !commitment_hash ||
+      !expires_at ||
+      !min_buy_amount ||
+      !sell_amount
     ) {
       return res.status(400).json({
         error: 'Missing required fields',
         required: [
-          'user_address',
-          'chain_id',
-          'order_type',
-          'base_token',
-          'quote_token',
-          'quantity',
-          'price',
+          'user_address', 'chain_id', 'order_type', 'base_token', 'quote_token',
+          'quantity', 'price', 'order_id', 'commitment_hash', 'expires_at',
+          'min_buy_amount', 'sell_amount',
         ],
       });
     }
@@ -70,14 +77,23 @@ router.post('/', async (req: Request, res: Response) => {
       });
     }
 
-    // TODO: Verify signature (implement signature verification)
-    // const isValidSignature = verifyOrderSignature(order_data, order_signature, user_address);
-    // if (!isValidSignature) {
-    //   return res.status(401).json({ error: 'Invalid signature' });
-    // }
+    // Verify on-chain commitment matches submitted details
+    const verificationError = await verifyCommitment(
+      order_id,
+      user_address,
+      base_token,
+      quote_token,
+      sell_amount,
+      min_buy_amount,
+      expires_at
+    );
 
-    // Generate commitment hash (simplified - should use proper keccak256)
-    // const commitment_hash = ethers.utils.keccak256(ethers.utils.toUtf8Bytes(JSON.stringify(order_data)));
+    if (verificationError) {
+      return res.status(403).json({
+        error: 'Commitment verification failed',
+        message: verificationError,
+      });
+    }
 
     // Submit order to Warlock matching engine
     const warlockClient = getWarlockClient();
@@ -90,10 +106,7 @@ router.post('/', async (req: Request, res: Response) => {
       quantity,
       price,
       variance_bps: varianceBps,
-      expires_in_seconds: expires_in_seconds || 0,
-      order_signature: order_signature || '',
-      order_data: order_data ? JSON.stringify(order_data) : '{}',
-      commitment_hash: commitment_hash || '',
+      commitment_hash,
     });
 
     res.status(201).json({

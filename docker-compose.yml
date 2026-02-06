@@ -51,6 +51,8 @@ services:
       PORT: 3001
       DATABASE_URL: postgresql://darkpool:darkpool_dev_password@postgres:5432/darkpool
       WARLOCK_GRPC_URL: warlock:50051
+      ROUTER_ADDRESS: ${ROUTER_ADDRESS:-0x0000000000000000000000000000000000000000}
+      RPC_URL: ${RPC_URL:-http://localhost:8545}
     ports:
       - "3001:3001"
     volumes:
