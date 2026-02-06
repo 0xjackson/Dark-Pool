@@ -20,6 +20,27 @@ services:
     networks:
       - darkpool-network
 
+  warlock:
+    build:
+      context: ./warlock
+      dockerfile: Dockerfile
+    container_name: darkpool-warlock
+    environment:
+      DATABASE_URL: postgresql://darkpool:darkpool_dev_password@postgres:5432/darkpool
+      GRPC_PORT: 50051
+      WORKERS: 4
+      LOG_LEVEL: debug
+      DB_MAX_CONNS: 25
+      DB_MIN_CONNS: 5
+    ports:
+      - "50051:50051"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - darkpool-network
+    restart: unless-stopped
+
   backend:
     build:
       context: ./app/server
@@ -29,6 +50,7 @@ services:
       NODE_ENV: development
       PORT: 3001
       DATABASE_URL: postgresql://darkpool:darkpool_dev_password@postgres:5432/darkpool
+      WARLOCK_GRPC_URL: warlock:50051
     ports:
       - "3001:3001"
     volumes:
@@ -37,6 +59,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      warlock:
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1"]
       interval: 10s
@@ -52,7 +76,7 @@ services:
     container_name: darkpool-frontend
     environment:
       NODE_ENV: development
-      NEXT_PUBLIC_API_URL: http://backend:3001
+      NEXT_PUBLIC_API_URL: http://localhost:3001
       NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID: ${NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID}
       NEXT_PUBLIC_DEFAULT_CHAIN_ID: ${NEXT_PUBLIC_DEFAULT_CHAIN_ID:-1}
       WATCHPACK_POLLING: true

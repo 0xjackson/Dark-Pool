@@ -1,6 +1,8 @@
 'use client';
 
 import { motion } from 'framer-motion';
+import { useTradeModal } from '@/hooks/useTradeModal';
+import { TradeModal } from '@/components/trading/TradeModal';
 
 /**
  * Hero section for center content
@@ -11,6 +13,7 @@ import { motion } from 'framer-motion';
  * - Smooth entrance animation
  */
 export function ConnectWallet() {
+  const { isOpen, openModal, closeModal } = useTradeModal();
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -23,10 +26,12 @@ export function ConnectWallet() {
       </p>
       <button
         type="button"
+        onClick={openModal}
         className="px-10 py-4 bg-dark-elevated/80 backdrop-blur-xl border border-purple-primary/30 hover:border-purple-primary/50 text-purple-secondary hover:text-white text-lg font-semibold rounded-lg transition-all duration-200"
       >
         Trade
       </button>
+      <TradeModal isOpen={isOpen} onClose={closeModal} />
     </motion.div>
   );
 }
