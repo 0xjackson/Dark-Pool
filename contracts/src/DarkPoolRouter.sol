@@ -1,6 +1,21 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
+//  ____             _      ____            _
+// |  _ \  __ _ _ __| | __ |  _ \ ___   ___ | |
+// | | | |/ _` | '__| |/ / | |_) / _ \ / _ \| |
+// | |_| | (_| | |  |   <  |  __/ (_) | (_) | |
+// |____/ \__,_|_|  |_|\_\ |_|   \___/ \___/|_|
+//
+//  ____             _
+// |  _ \ ___  _   _| |_ ___ _ __
+// | |_) / _ \| | | | __/ _ \ '__|
+// |  _ < (_) | |_| | ||  __/ |
+// |_| \_\___/ \__,_|\__\___|_|
+//
+// Commit-reveal order router for private P2P trading
+// Settlement via Yellow Network App Sessions
+
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./interfaces/IYellowCustody.sol";
