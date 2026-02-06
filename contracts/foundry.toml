@@ -5,3 +5,7 @@ libs = ["lib"]
 remappings = [
     "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/"
 ]
+ignore = [
+    "lib/openzeppelin-contracts/certora/**",
+    "lib/openzeppelin-contracts/test/**"
+]
