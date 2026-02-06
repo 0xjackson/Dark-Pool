@@ -28,6 +28,7 @@ router.post('/', async (req: Request, res: Response) => {
       expires_in_seconds,
       order_signature,
       order_data,
+      commitment_hash,
     } = req.body;
 
     // Validate required fields
@@ -92,6 +93,7 @@ router.post('/', async (req: Request, res: Response) => {
       expires_in_seconds: expires_in_seconds || 0,
       order_signature: order_signature || '',
       order_data: order_data ? JSON.stringify(order_data) : '{}',
+      commitment_hash: commitment_hash || '',
     });
 
     res.status(201).json({

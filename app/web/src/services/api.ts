@@ -227,6 +227,61 @@ export async function fetchUserMatches(
 }
 
 /**
+ * Submits a commitment hash for an order
+ * @param request - The commit hash details
+ * @returns Promise resolving to success status
+ * @throws ApiError on failure
+ */
+export async function submitCommitHash(request: {
+  order_id: string;
+  commitment_hash: string;
+  user_address: string;
+}): Promise<{ success: boolean }> {
+  const url = `${API_BASE_URL}/api/commit-hash`;
+
+  try {
+    const response = await fetchWithTimeout(
+      url,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(request),
+      },
+      DEFAULT_TIMEOUT
+    );
+
+    if (!response.ok) {
+      throw await createApiErrorFromResponse(response, 'Failed to submit commitment hash');
+    }
+
+    return await response.json();
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+
+    if (error instanceof TimeoutError) {
+      throw new ApiError(error.message, 408, { type: 'timeout' });
+    }
+
+    if (error instanceof TypeError || error instanceof Error) {
+      throw new ApiError(
+        error.message || 'Network request failed',
+        0,
+        { type: 'network', originalError: error.message }
+      );
+    }
+
+    throw new ApiError('An unexpected error occurred while submitting commitment hash', 500, {
+      type: 'unknown',
+      error: String(error),
+    });
+  }
+}
+
+/**
  * Fetches a single order by ID
  * @param orderId - The order ID
  * @returns Promise resolving to the order

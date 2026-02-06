@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { TokenPairSelector } from './TokenPairSelector';
 import { OrderTypeToggle } from './OrderTypeToggle';
 import { SlippageInput } from './SlippageInput';
-import { useOrderSubmit } from '@/hooks/useOrderSubmit';
+import { useSubmitTrade } from '@/hooks/useSubmitTrade';
 import { validateOrderForm } from '@/utils/validation';
 import { TradingPair } from '@/types/trading';
 import { OrderType } from '@/types/order';
@@ -29,7 +29,7 @@ interface OrderFormProps {
 export function OrderForm({ onSuccess }: OrderFormProps) {
   const { isConnected } = useAccount();
   const chainId = useChainId();
-  const { loading, error, success, submitOrder, reset } = useOrderSubmit();
+  const { loading, error, success, submitTrade, stepMessage, reset } = useSubmitTrade();
 
   // Form state
   const [tokenPair, setTokenPair] = useState<TradingPair | null>(null);
@@ -87,8 +87,8 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
       return;
     }
 
-    // Submit order
-    await submitOrder(formData);
+    // Submit trade (sign → deposit → submit → store commitment)
+    await submitTrade(formData);
   };
 
   // Check if form is valid
@@ -276,7 +276,7 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
                 d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
               />
             </svg>
-            Submitting...
+            {stepMessage || 'Submitting...'}
           </span>
         ) : (
           'Submit Order'
