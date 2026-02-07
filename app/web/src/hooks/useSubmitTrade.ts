@@ -8,10 +8,26 @@ import { submitOrder as apiSubmitOrder } from '@/services/api';
 import { ApiError } from '@/utils/errors';
 import { ROUTER_ADDRESS, ROUTER_ABI, ERC20_ABI } from '@/config/contracts';
 
+const CUSTODY_ADDRESS = (process.env.NEXT_PUBLIC_CUSTODY_ADDRESS ||
+  '0x0000000000000000000000000000000000000000') as `0x${string}`;
+
+const CUSTODY_ABI = [
+  {
+    name: 'getAccountsBalances',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'accounts', type: 'address[]' },
+      { name: 'tokens', type: 'address[]' },
+    ],
+    outputs: [{ name: '', type: 'uint256[][]' }],
+  },
+] as const;
+
 const STEP_MESSAGES: Record<TradeSubmitStep, string> = {
   idle: '',
   approving: 'Approving token spend\u2026',
-  committing: 'Depositing & committing order\u2026',
+  committing: 'Committing order\u2026',
   submitting_order: 'Submitting order to matching engine\u2026',
   complete: 'Complete!',
   error: 'Error',
@@ -86,34 +102,62 @@ export function useSubmitTrade(): UseSubmitTradeReturn {
           orderId, address, sellToken, buyToken, sellAmount, minBuyAmount, expiresAt
         );
 
-        // Step 1: Check allowance and approve if needed
-        const allowance = await publicClient.readContract({
-          address: sellToken,
-          abi: ERC20_ABI,
-          functionName: 'allowance',
-          args: [address, ROUTER_ADDRESS],
-        });
-
-        if ((allowance as bigint) < sellAmount) {
-          setCurrentStep('approving');
-          const approveHash = await walletClient.writeContract({
-            address: sellToken,
-            abi: ERC20_ABI,
-            functionName: 'approve',
-            args: [ROUTER_ADDRESS, maxUint256],
-          });
-          await publicClient.waitForTransactionReceipt({ hash: approveHash });
+        // Check if user has sufficient Custody balance for commitOnly
+        let useCustodyBalance = false;
+        if (CUSTODY_ADDRESS !== '0x0000000000000000000000000000000000000000') {
+          try {
+            const balances = await publicClient.readContract({
+              address: CUSTODY_ADDRESS,
+              abi: CUSTODY_ABI,
+              functionName: 'getAccountsBalances',
+              args: [[address], [sellToken]],
+            });
+            const custodyBalance = (balances as bigint[][])?.[0]?.[0] ?? 0n;
+            useCustodyBalance = custodyBalance >= sellAmount;
+          } catch {
+            // Custody query failed — fall back to depositAndCommit
+          }
         }
 
-        // Step 2: Call depositAndCommit on-chain
         setCurrentStep('committing');
-        const commitHash = await walletClient.writeContract({
-          address: ROUTER_ADDRESS,
-          abi: ROUTER_ABI,
-          functionName: 'depositAndCommit',
-          args: [sellToken, sellAmount, orderId, orderHash],
-        });
-        await publicClient.waitForTransactionReceipt({ hash: commitHash });
+        if (useCustodyBalance) {
+          // User already has funds in Custody — just store the commitment
+          const commitHash = await walletClient.writeContract({
+            address: ROUTER_ADDRESS,
+            abi: ROUTER_ABI,
+            functionName: 'commitOnly',
+            args: [orderId, orderHash],
+          });
+          await publicClient.waitForTransactionReceipt({ hash: commitHash });
+        } else {
+          // User needs to deposit ERC-20 tokens + commit
+          const allowance = await publicClient.readContract({
+            address: sellToken,
+            abi: ERC20_ABI,
+            functionName: 'allowance',
+            args: [address, ROUTER_ADDRESS],
+          });
+
+          if ((allowance as bigint) < sellAmount) {
+            setCurrentStep('approving');
+            const approveHash = await walletClient.writeContract({
+              address: sellToken,
+              abi: ERC20_ABI,
+              functionName: 'approve',
+              args: [ROUTER_ADDRESS, maxUint256],
+            });
+            await publicClient.waitForTransactionReceipt({ hash: approveHash });
+            setCurrentStep('committing');
+          }
+
+          const commitHash = await walletClient.writeContract({
+            address: ROUTER_ADDRESS,
+            abi: ROUTER_ABI,
+            functionName: 'depositAndCommit',
+            args: [sellToken, sellAmount, orderId, orderHash],
+          });
+          await publicClient.waitForTransactionReceipt({ hash: commitHash });
+        }
 
         // Step 3: Submit order details to backend
         setCurrentStep('submitting_order');
