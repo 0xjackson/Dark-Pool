@@ -428,6 +428,10 @@ export async function createAppSession(
   msgObj.sig.push(buyerSig);
 
   const raw = await sendAndWait(engineWs, JSON.stringify(msgObj));
+  const anyParsed = parseAnyRPCResponse(raw);
+  if (anyParsed.method === RPCMethod.Error) {
+    throw new Error(`create_app_session rejected by clearnode: ${JSON.stringify(anyParsed.params)}`);
+  }
   const parsed = parseCreateAppSessionResponse(raw);
   return parsed.params.appSessionId;
 }
@@ -444,6 +448,10 @@ export async function closeAppSession(
   });
 
   const raw = await sendAndWait(engineWs, closeMsg);
+  const anyParsed = parseAnyRPCResponse(raw);
+  if (anyParsed.method === RPCMethod.Error) {
+    throw new Error(`close_app_session rejected by clearnode: ${JSON.stringify(anyParsed.params)}`);
+  }
   const parsed = parseCloseAppSessionResponse(raw);
 
   if (parsed.params.status !== 'closed') {
