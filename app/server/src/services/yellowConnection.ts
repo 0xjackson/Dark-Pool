@@ -27,6 +27,7 @@ import { generateSessionKey } from '../utils/keygen';
 
 const YELLOW_WS_URL = process.env.YELLOW_WS_URL || 'wss://clearnet-sandbox.yellow.com/ws';
 const ENGINE_WALLET_KEY = process.env.ENGINE_WALLET_KEY as Hex | undefined;
+const CHAIN_ID = process.env.CHAIN_ID ? parseInt(process.env.CHAIN_ID, 10) : 8453;
 const RESPONSE_TIMEOUT = 10_000;
 const PING_INTERVAL_MS = 30_000; // Send ping every 30s to keep WS alive
 
@@ -250,11 +251,17 @@ async function loadAssetMap(): Promise<void> {
   assetMap = new Map();
   if (parsed.params?.assets) {
     for (const asset of parsed.params.assets) {
+      // Filter by our chain to avoid cross-chain address collisions
+      // (e.g. 0xeeee...eeee is native token on multiple chains with different symbols)
+      if (asset.chainId !== CHAIN_ID) continue;
       assetMap.set(asset.token.toLowerCase(), asset.symbol.toLowerCase());
     }
   }
 
-  console.log(`Loaded ${assetMap.size} assets from Yellow Network`);
+  console.log(`Loaded ${assetMap.size} assets for chain ${CHAIN_ID} from Yellow Network`);
+  for (const [addr, sym] of assetMap) {
+    console.log(`  ${sym}: ${addr}`);
+  }
 }
 
 export function getAssetSymbol(tokenAddress: string): string | undefined {
