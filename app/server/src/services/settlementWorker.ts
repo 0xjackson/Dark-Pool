@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { Hex, Address, getAddress } from 'viem';
+import { Hex, Address, getAddress, parseUnits } from 'viem';
 import {
   getAssetSymbol,
   getEngineAddress,
@@ -136,6 +136,12 @@ async function settleMatch(match: any): Promise<void> {
   // Calculate quote amount: quantity * price (string math to avoid float issues)
   const quoteAmount = stringMultiply(match.quantity, match.price);
 
+  // Convert human-readable fill amounts to wei strings
+  const baseDecimals = getTokenDecimals(match.base_token);
+  const quoteDecimals = getTokenDecimals(match.quote_token);
+  const sellerFillAmountWei = parseUnits(match.quantity, baseDecimals).toString();
+  const buyerFillAmountWei = parseUnits(quoteAmount, quoteDecimals).toString();
+
   const engineAddress = getEngineAddress();
   const seller = match.seller_address as Address;
   const buyer = match.buyer_address as Address;
@@ -202,8 +208,8 @@ async function settleMatch(match: any): Promise<void> {
     },
     sellerOrder.commitment_hash,
     buyerOrder.commitment_hash,
-    match.quantity,      // sellerFillAmount
-    quoteAmount,         // buyerFillAmount
+    sellerFillAmountWei, // sellerFillAmount (wei)
+    buyerFillAmountWei,  // buyerFillAmount (wei)
     sellerSettledSoFar,
     buyerSettledSoFar,
     proofTimestamp,
@@ -222,8 +228,8 @@ async function settleMatch(match: any): Promise<void> {
       args: [
         sellerOrder.order_id as Hex,
         buyerOrder.order_id as Hex,
-        BigInt(match.quantity),
-        BigInt(quoteAmount),
+        BigInt(sellerFillAmountWei),
+        BigInt(buyerFillAmountWei),
         BigInt(proofTimestamp),
         proof.a.map(BigInt) as [bigint, bigint],
         proof.b.map((row: string[]) => row.map(BigInt)) as [[bigint, bigint], [bigint, bigint]],
@@ -369,4 +375,11 @@ function stringMultiply(a: string, b: string): string {
   const decPart = padded.slice(padded.length - totalDecimals).replace(/0+$/, '');
 
   return decPart ? `${intPart}.${decPart}` : intPart;
+}
+
+function getTokenDecimals(tokenAddress: string): number {
+  const addr = tokenAddress.toLowerCase();
+  if (addr === '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913') return 6; // USDC on Base
+  if (addr === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee') return 18; // Native ETH
+  return 18;
 }
