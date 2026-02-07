@@ -42,8 +42,9 @@ function getContract(): ethers.Contract {
 export async function verifyCommitment(
   orderId: string,
   user: string,
-  sellToken: string,
-  buyToken: string,
+  orderType: string,
+  baseToken: string,
+  quoteToken: string,
   sellAmount: string,
   minBuyAmount: string,
   expiresAt: number
@@ -51,10 +52,26 @@ export async function verifyCommitment(
   try {
     const contract = getContract();
 
-    const commitment = await contract.commitments(orderId);
-    const [, commitHash, , , commitStatus] = commitment;
+    // Derive contract-level tokens from trading pair + order type
+    // SELL: sellToken = baseToken, buyToken = quoteToken
+    // BUY: sellToken = quoteToken, buyToken = baseToken
+    const isBuy = orderType === 'BUY';
+    const sellToken = isBuy ? quoteToken : baseToken;
+    const buyToken = isBuy ? baseToken : quoteToken;
 
-    if (Number(commitStatus) !== STATUS_ACTIVE) {
+    // Retry a few times — public RPC nodes may lag behind the frontend's provider
+    let commitment;
+    let commitStatus = 0;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      commitment = await contract.commitments(orderId);
+      commitStatus = Number(commitment[4]);
+      if (commitStatus === STATUS_ACTIVE) break;
+      if (attempt < 4) await new Promise((r) => setTimeout(r, 2000));
+    }
+
+    const [, commitHash] = commitment;
+
+    if (commitStatus !== STATUS_ACTIVE) {
       return 'Commitment not found or not active on-chain';
     }
 

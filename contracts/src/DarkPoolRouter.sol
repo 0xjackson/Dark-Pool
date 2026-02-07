@@ -35,6 +35,14 @@ contract DarkPoolRouter {
     uint256 public constant SNARK_SCALAR_FIELD =
         21888242871839275222246405745257275088548364400416034343698204186575808495617;
 
+    /// @notice Native ETH sentinel (matches frontend convention, avoids address(0) in calldata)
+    address public constant NATIVE_ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+
+    /// @notice Maximum age of a ZK proof timestamp (5 minutes).
+    /// The proof is generated off-chain with a snapshot timestamp and verified on-chain
+    /// against block.timestamp. This bounds how stale a proof can be.
+    uint256 public constant MAX_PROOF_AGE = 300;
+
     // ============ STATE ============
 
     IYellowCustody public immutable custody;
@@ -116,7 +124,11 @@ contract DarkPoolRouter {
     // ============ USER FUNCTIONS ============
 
     /// @notice Deposit tokens to Yellow and commit order hash (one transaction)
-    function depositAndCommit(address token, uint256 depositAmount, bytes32 orderId, bytes32 orderHash) external {
+    /// @dev For native ETH, pass token=address(0) and send ETH via msg.value
+    function depositAndCommit(address token, uint256 depositAmount, bytes32 orderId, bytes32 orderHash)
+        external
+        payable
+    {
         require(commitments[orderId].status == Status.None, "Order exists");
 
         // Defensive: ensure orderId and orderHash fit in BN128 scalar field for ZK compatibility.
@@ -125,12 +137,16 @@ contract DarkPoolRouter {
         require(uint256(orderId) < SNARK_SCALAR_FIELD, "orderId exceeds field");
         require(uint256(orderHash) < SNARK_SCALAR_FIELD, "orderHash exceeds field");
 
-        // Pull tokens from user
-        IERC20(token).safeTransferFrom(msg.sender, address(this), depositAmount);
-
-        // Deposit to Yellow Custody — credits USER's unified balance (not Router's)
-        IERC20(token).approve(address(custody), depositAmount);
-        custody.deposit(msg.sender, token, depositAmount);
+        if (token == NATIVE_ETH) {
+            // Native ETH path — Custody expects address(0) for native ETH
+            require(msg.value == depositAmount, "ETH amount mismatch");
+            custody.deposit{value: msg.value}(msg.sender, address(0), msg.value);
+        } else {
+            // ERC-20 path
+            IERC20(token).safeTransferFrom(msg.sender, address(this), depositAmount);
+            IERC20(token).approve(address(custody), depositAmount);
+            custody.deposit(msg.sender, token, depositAmount);
+        }
 
         // Store commitment (settledAmount starts at 0)
         commitments[orderId] = Commitment({
@@ -241,16 +257,23 @@ contract DarkPoolRouter {
     ///      The contract reads commitment hashes + settledAmounts from storage and passes
     ///      them as public inputs. This prevents replay (settledAmount changes after each call,
     ///      making old proofs invalid).
+    ///      proofTimestamp is the timestamp snapshot used during off-chain proof generation.
+    ///      It must be recent (within MAX_PROOF_AGE of block.timestamp) and not in the future.
     function proveAndSettle(
         bytes32 sellerOrderId,
         bytes32 buyerOrderId,
         uint256 sellerFillAmount,
         uint256 buyerFillAmount,
+        uint256 proofTimestamp,
         uint256[2] calldata a,
         uint256[2][2] calldata b,
         uint256[2] calldata c
     ) external {
         require(msg.sender == engine, "Only engine");
+
+        // Bound the proof timestamp: must be recent and not in the future
+        require(proofTimestamp <= block.timestamp, "Timestamp in future");
+        require(block.timestamp - proofTimestamp <= MAX_PROOF_AGE, "Proof too old");
 
         Commitment storage sellerC = commitments[sellerOrderId];
         Commitment storage buyerC = commitments[buyerOrderId];
@@ -260,15 +283,17 @@ contract DarkPoolRouter {
         require(sellerFillAmount > 0, "Zero seller fill");
         require(buyerFillAmount > 0, "Zero buyer fill");
 
-        // Build public inputs array — must match circuit's public signal order exactly
+        // Build public inputs array — must match circuit's public signal order exactly.
+        // Uses proofTimestamp (the snapshot from proof generation) instead of block.timestamp
+        // so the proof's public signals match what the verifier checks.
         uint256[7] memory pubInputs = [
-            uint256(sellerC.orderHash),   // [0] sellerCommitmentHash
-            uint256(buyerC.orderHash),    // [1] buyerCommitmentHash
-            sellerFillAmount,             // [2] sellerFillAmount
-            buyerFillAmount,              // [3] buyerFillAmount
-            sellerC.settledAmount,        // [4] sellerSettledSoFar
-            buyerC.settledAmount,         // [5] buyerSettledSoFar
-            block.timestamp               // [6] currentTimestamp
+            uint256(sellerC.orderHash), // [0] sellerCommitmentHash
+            uint256(buyerC.orderHash), // [1] buyerCommitmentHash
+            sellerFillAmount, // [2] sellerFillAmount
+            buyerFillAmount, // [3] buyerFillAmount
+            sellerC.settledAmount, // [4] sellerSettledSoFar
+            buyerC.settledAmount, // [5] buyerSettledSoFar
+            proofTimestamp // [6] currentTimestamp
         ];
 
         require(zkVerifier.verifyProof(a, b, c, pubInputs), "Invalid proof");

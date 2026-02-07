@@ -74,16 +74,41 @@ export function useSubmitTrade(): UseSubmitTradeReturn {
       }
 
       try {
-        const sellToken = formData.tokenPair.baseToken.address as `0x${string}`;
-        const buyToken = formData.tokenPair.quoteToken.address as `0x${string}`;
-        const sellAmount = parseUnits(formData.amount, formData.tokenPair.baseToken.decimals);
+        const isBuy = formData.orderType === 'BUY';
+
+        // Trading pair tokens (same for BUY and SELL — used for matching in Warlock)
+        const baseTokenAddr = formData.tokenPair.baseToken.address as `0x${string}`;
+        const quoteTokenAddr = formData.tokenPair.quoteToken.address as `0x${string}`;
+
+        // Contract-level tokens (what user actually deposits/receives)
+        // SELL ETH/USDC: deposit ETH, receive USDC
+        // BUY ETH/USDC: deposit USDC, receive ETH
+        const sellToken = isBuy ? quoteTokenAddr : baseTokenAddr;
+        const buyToken = isBuy ? baseTokenAddr : quoteTokenAddr;
+        const sellDecimals = isBuy
+          ? formData.tokenPair.quoteToken.decimals
+          : formData.tokenPair.baseToken.decimals;
+        const buyDecimals = isBuy
+          ? formData.tokenPair.baseToken.decimals
+          : formData.tokenPair.quoteToken.decimals;
+
         const varianceBps = Math.round(formData.slippage * 100);
 
-        // Calculate minBuyAmount from price and slippage
-        const rawBuyAmount = parseUnits(
-          (parseFloat(formData.amount) * parseFloat(formData.price)).toString(),
-          formData.tokenPair.quoteToken.decimals
-        );
+        // SELL: deposit formData.amount of base, receive (amount * price) of quote
+        // BUY: deposit (amount * price) of quote, receive formData.amount of base
+        const sellAmount = isBuy
+          ? parseUnits(
+              (parseFloat(formData.amount) * parseFloat(formData.price)).toString(),
+              sellDecimals
+            )
+          : parseUnits(formData.amount, sellDecimals);
+
+        const rawBuyAmount = isBuy
+          ? parseUnits(formData.amount, buyDecimals)
+          : parseUnits(
+              (parseFloat(formData.amount) * parseFloat(formData.price)).toString(),
+              buyDecimals
+            );
         const minBuyAmount = rawBuyAmount - (rawBuyAmount * BigInt(varianceBps)) / 10000n;
 
         const expiresAt = BigInt(Math.floor(Date.now() / 1000) + 3600); // 1 hour
@@ -125,6 +150,8 @@ export function useSubmitTrade(): UseSubmitTradeReturn {
           }
         }
 
+        const isNativeETH = sellToken.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+
         setCurrentStep('committing');
         if (useCustodyBalance) {
           // User already has funds in Custody — just store the commitment
@@ -135,8 +162,18 @@ export function useSubmitTrade(): UseSubmitTradeReturn {
             args: [orderId, orderHash],
           });
           await publicClient.waitForTransactionReceipt({ hash: commitHash });
+        } else if (isNativeETH) {
+          // Native ETH — no approval needed, send value with depositAndCommit
+          const commitHash = await walletClient.writeContract({
+            address: ROUTER_ADDRESS,
+            abi: ROUTER_ABI,
+            functionName: 'depositAndCommit',
+            args: [sellToken, sellAmount, orderId, orderHash],
+            value: sellAmount,
+          });
+          await publicClient.waitForTransactionReceipt({ hash: commitHash });
         } else {
-          // User needs to deposit ERC-20 tokens + commit
+          // ERC-20 — check allowance, approve if needed, then deposit + commit
           const allowance = await publicClient.readContract({
             address: sellToken,
             abi: ERC20_ABI,
@@ -171,8 +208,8 @@ export function useSubmitTrade(): UseSubmitTradeReturn {
           user_address: address,
           chain_id: chainId,
           order_type: formData.orderType,
-          base_token: sellToken,
-          quote_token: buyToken,
+          base_token: baseTokenAddr,
+          quote_token: quoteTokenAddr,
           quantity: formData.amount,
           price: formData.price,
           variance_bps: varianceBps,
