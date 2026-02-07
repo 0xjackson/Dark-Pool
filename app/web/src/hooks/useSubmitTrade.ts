@@ -125,6 +125,8 @@ export function useSubmitTrade(): UseSubmitTradeReturn {
           }
         }
 
+        const isNativeETH = sellToken.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+
         setCurrentStep('committing');
         if (useCustodyBalance) {
           // User already has funds in Custody — just store the commitment
@@ -135,8 +137,18 @@ export function useSubmitTrade(): UseSubmitTradeReturn {
             args: [orderId, orderHash],
           });
           await publicClient.waitForTransactionReceipt({ hash: commitHash });
+        } else if (isNativeETH) {
+          // Native ETH — no approval needed, send value with depositAndCommit
+          const commitHash = await walletClient.writeContract({
+            address: ROUTER_ADDRESS,
+            abi: ROUTER_ABI,
+            functionName: 'depositAndCommit',
+            args: [sellToken, sellAmount, orderId, orderHash],
+            value: sellAmount,
+          });
+          await publicClient.waitForTransactionReceipt({ hash: commitHash });
         } else {
-          // User needs to deposit ERC-20 tokens + commit
+          // ERC-20 — check allowance, approve if needed, then deposit + commit
           const allowance = await publicClient.readContract({
             address: sellToken,
             abi: ERC20_ABI,

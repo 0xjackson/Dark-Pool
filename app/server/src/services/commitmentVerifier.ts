@@ -51,10 +51,19 @@ export async function verifyCommitment(
   try {
     const contract = getContract();
 
-    const commitment = await contract.commitments(orderId);
-    const [, commitHash, , , commitStatus] = commitment;
+    // Retry a few times — public RPC nodes may lag behind the frontend's provider
+    let commitment;
+    let commitStatus = 0;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      commitment = await contract.commitments(orderId);
+      commitStatus = Number(commitment[4]);
+      if (commitStatus === STATUS_ACTIVE) break;
+      if (attempt < 4) await new Promise((r) => setTimeout(r, 2000));
+    }
 
-    if (Number(commitStatus) !== STATUS_ACTIVE) {
+    const [, commitHash] = commitment;
+
+    if (commitStatus !== STATUS_ACTIVE) {
       return 'Commitment not found or not active on-chain';
     }
 

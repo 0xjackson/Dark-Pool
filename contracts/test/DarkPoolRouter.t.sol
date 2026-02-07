@@ -9,23 +9,21 @@ import {PoseidonT6} from "poseidon-solidity/PoseidonT6.sol";
 import {PoseidonT4} from "poseidon-solidity/PoseidonT4.sol";
 
 contract MockZKVerifier {
-    function verifyProof(
-        uint256[2] calldata,
-        uint256[2][2] calldata,
-        uint256[2] calldata,
-        uint256[7] calldata
-    ) external pure returns (bool) {
+    function verifyProof(uint256[2] calldata, uint256[2][2] calldata, uint256[2] calldata, uint256[7] calldata)
+        external
+        pure
+        returns (bool)
+    {
         return true;
     }
 }
 
 contract RejectingZKVerifier {
-    function verifyProof(
-        uint256[2] calldata,
-        uint256[2][2] calldata,
-        uint256[2] calldata,
-        uint256[7] calldata
-    ) external pure returns (bool) {
+    function verifyProof(uint256[2] calldata, uint256[2][2] calldata, uint256[2] calldata, uint256[7] calldata)
+        external
+        pure
+        returns (bool)
+    {
         return false;
     }
 }
@@ -570,7 +568,8 @@ contract DarkPoolRouterTest is Test {
         assertEq(uint8(sellerStatus), uint8(DarkPoolRouter.Status.Active));
 
         // Buyer 2: 38 TKB
-        DarkPoolRouter.OrderDetails memory buyer2 = _makeBuyerOrder(BUYER2_ORDER_ID, charlie, 38 ether, 36 ether, expiresAt);
+        DarkPoolRouter.OrderDetails memory buyer2 =
+            _makeBuyerOrder(BUYER2_ORDER_ID, charlie, 38 ether, 36 ether, expiresAt);
         _commitOrder(charlie, address(tokenB), 38 ether, buyer2);
 
         // Second partial fill via ZK: 40/38
@@ -628,6 +627,54 @@ contract DarkPoolRouterTest is Test {
         vm.prank(engine);
         vm.expectRevert("Seller not active");
         router.proveAndSettle(bytes32(uint256(1)), bytes32(uint256(3)), 100, 100, dummyA, dummyB, dummyC);
+    }
+
+    // ============ NATIVE ETH DEPOSIT ============
+
+    function test_DepositAndCommit_NativeETH() public {
+        uint256 expiresAt = block.timestamp + 1 hours;
+        address NATIVE_ETH = router.NATIVE_ETH();
+
+        // Build order with sellToken = NATIVE_ETH sentinel
+        DarkPoolRouter.OrderDetails memory seller = DarkPoolRouter.OrderDetails({
+            orderId: SELLER_ORDER_ID,
+            user: alice,
+            sellToken: NATIVE_ETH,
+            buyToken: address(tokenB),
+            sellAmount: 1 ether,
+            minBuyAmount: 0.9 ether,
+            expiresAt: expiresAt
+        });
+
+        bytes32 hash = _poseidonHash(seller);
+
+        // Give alice some ETH
+        vm.deal(alice, 10 ether);
+
+        vm.prank(alice);
+        router.depositAndCommit{value: 1 ether}(NATIVE_ETH, 1 ether, SELLER_ORDER_ID, hash);
+
+        // Verify commitment stored
+        (address user,,, uint256 settledAmount, DarkPoolRouter.Status status) = router.commitments(SELLER_ORDER_ID);
+        assertEq(user, alice);
+        assertEq(settledAmount, 0);
+        assertEq(uint8(status), uint8(DarkPoolRouter.Status.Active));
+
+        // Verify custody received the ETH deposit (Custody uses address(0) for native ETH)
+        assertEq(custody.deposits(alice, address(0)), 1 ether);
+    }
+
+    function test_RevertDepositAndCommit_ETHAmountMismatch() public {
+        address NATIVE_ETH = router.NATIVE_ETH();
+        bytes32 oid = bytes32(uint256(1));
+        bytes32 ohash = bytes32(uint256(2));
+
+        vm.deal(alice, 10 ether);
+
+        // Send 1 ETH but claim depositAmount is 2 ETH — should revert
+        vm.prank(alice);
+        vm.expectRevert("ETH amount mismatch");
+        router.depositAndCommit{value: 1 ether}(NATIVE_ETH, 2 ether, oid, ohash);
     }
 
     function test_RevertProveAndSettle_ZeroFill() public {
