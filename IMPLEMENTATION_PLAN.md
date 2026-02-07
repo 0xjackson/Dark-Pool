@@ -101,12 +101,13 @@ The hash alone proves: who placed the order, what tokens, what amounts, and when
 ### Frontend Flow (useSubmitTrade hook)
 
 ```typescript
-// 1. Compute order hash using Poseidon (ZK-friendly hash, enables private settlement)
-// Poseidon produces the same bytes32 commitment but can be verified inside a ZK circuit
-// in ~250 constraints vs keccak256's ~150,000 — enabling sub-second proof generation
+// 1. Compute order hash using nested Poseidon (ZK-friendly hash, enables private settlement)
+// poseidon-solidity ships PoseidonT2-T6 (1-5 inputs), so we hash 7 fields in two passes
+// ~500 constraints in ZK circuit vs keccak256's ~150,000 — enabling sub-second proof generation
 import { buildPoseidon } from 'circomlibjs';
 const poseidon = await buildPoseidon();
-const orderHash = poseidon([orderId, address, sellToken, buyToken, sellAmount, minBuyAmount, expiresAt]);
+const h1 = poseidon([orderId, address, sellToken, buyToken, sellAmount]);  // 5 inputs → PoseidonT6
+const orderHash = poseidon([h1, minBuyAmount, expiresAt]);                  // 3 inputs → PoseidonT4
 
 // 2. Check allowance, approve if needed (MaxUint256 = one-time)
 if (allowance < sellAmount) {
@@ -135,8 +136,9 @@ The backend verifies the submitted order details match the on-chain commitment b
 // Backend reads commitment from DarkPoolRouter via RPC (~50ms)
 const commitment = await contract.commitments(orderId);
 
-// Recompute Poseidon hash from submitted details (same hash function as frontend)
-const expectedHash = poseidon([orderId, user, sellToken, buyToken, sellAmount, minBuyAmount, expiresAt]);
+// Recompute nested Poseidon hash from submitted details (same two-step hash as frontend)
+const h1 = poseidon([orderId, user, sellToken, buyToken, sellAmount]);
+const expectedHash = poseidon([h1, minBuyAmount, expiresAt]);
 
 // If hash doesn't match, reject — prevents order book poisoning
 if (expectedHash !== commitment.orderHash) {

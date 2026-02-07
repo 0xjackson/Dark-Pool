@@ -216,9 +216,14 @@ Poseidon is a hash designed for ZK circuits — ~250 constraints vs keccak256's 
 // Current (to be replaced)
 orderHash = keccak256(abi.encode(orderId, user, sellToken, buyToken, sellAmount, minBuyAmount, expiresAt))
 
-// Production (Poseidon everywhere)
-orderHash = poseidon(orderId, user, sellToken, buyToken, sellAmount, minBuyAmount, expiresAt)
+// Production (nested Poseidon — poseidon-solidity ships PoseidonT2-T6 only, not T8 for 7 inputs)
+h1        = PoseidonT6([orderId, user, sellToken, buyToken, sellAmount])   // 5 inputs
+orderHash = PoseidonT4([h1, minBuyAmount, expiresAt])                      // 3 inputs
 ```
+
+**Nested Poseidon:** The `poseidon-solidity` library ships PoseidonT2-T6 (1-5 inputs). Our order has 7 fields, requiring PoseidonT8 which doesn't exist. Instead we hash in two passes using available contracts. This adds ~250 constraints in the circuit (~500 total instead of ~250) and ~200k gas on-chain (two calls at ~100k each) — both trivial.
+
+**Cross-implementation compatibility verified:** `poseidon-solidity` derives its round constants from `circomlibjs` v0.0.8 (same source, explicit dependency). Its test suite asserts `PoseidonT{n}.hash(input) == circomlibjs.poseidon(input)` for all shipped arities with random inputs, zeros, and overflow values. The nested hash produces identical results across Solidity, circomlibjs (JS), and circomlib (Circom).
 
 **The contract's `depositAndCommit` doesn't change** — it stores a `bytes32` hash without computing it. The hash function change is in the frontend (order submission), backend (commitment verification), and `revealAndSettle` on-chain verification (uses `poseidon-solidity` library).
 
@@ -253,10 +258,11 @@ The contract adds a defensive `require` for belt-and-suspenders safety (see `dep
 Poseidon produces a field element (~254 bits), stored as `bytes32` with the top 2 bits always zero. Canonical conversion:
 
 ```typescript
-// Frontend/Backend (circomlibjs)
+// Frontend/Backend (circomlibjs) — nested two-step hash
 const poseidon = await buildPoseidon();
-const hash = poseidon([orderId, user, sellToken, buyToken, sellAmount, minBuyAmount, expiresAt]);
-const orderHash = '0x' + poseidon.F.toString(hash, 16).padStart(64, '0');  // bytes32
+const h1 = poseidon([orderId, user, sellToken, buyToken, sellAmount]);       // 5 inputs → t=6
+const hash = poseidon([h1, minBuyAmount, expiresAt]);                         // 3 inputs → t=4
+const orderHash = '0x' + poseidon.F.toString(hash, 16).padStart(64, '0');    // bytes32
 ```
 
 No special handling needed — `bytes32` can store 254-bit values. The hash just happens to never use the full 256-bit range.
@@ -274,9 +280,9 @@ PUBLIC INPUTS (visible on-chain):
   - sellerSettledSoFar, buyerSettledSoFar (cumulative settled)
   - currentTimestamp
 
-CIRCUIT PROVES:
-  1. poseidon(seller.*) == sellerCommitmentHash        // commitment integrity
-  2. poseidon(buyer.*)  == buyerCommitmentHash         // commitment integrity
+CIRCUIT PROVES (nested Poseidon — PoseidonT6 + PoseidonT4):
+  1. PoseidonT4(PoseidonT6(seller.orderId, seller.user, seller.sellToken, seller.buyToken, seller.sellAmount), seller.minBuyAmount, seller.expiresAt) == sellerCommitmentHash
+  2. Same for buyer == buyerCommitmentHash
   3. seller.sellToken == buyer.buyToken                 // token match
   4. seller.buyToken  == buyer.sellToken                // token match
   5. currentTimestamp < seller.expiresAt                // not expired
@@ -357,18 +363,20 @@ Both functions coexist:
 **Critical:** `revealAndSettle` recomputes the commitment hash on-chain to verify order details. Since commitments are now Poseidon hashes, this requires the `poseidon-solidity` library (`forge install poseidon-solidity/poseidon-solidity`). The fallback verifies:
 
 ```solidity
-import {PoseidonT8} from "poseidon-solidity/PoseidonT8.sol";
+import {PoseidonT6} from "poseidon-solidity/PoseidonT6.sol";
+import {PoseidonT4} from "poseidon-solidity/PoseidonT4.sol";
 
-// In revealAndSettle:
-bytes32 sellerHash = bytes32(PoseidonT8.hash([
+// In revealAndSettle (nested hash — matches circomlibjs and circuit):
+uint256 h1 = PoseidonT6.hash([
     uint256(seller.orderId), uint256(uint160(seller.user)),
     uint256(uint160(seller.sellToken)), uint256(uint160(seller.buyToken)),
-    seller.sellAmount, seller.minBuyAmount, seller.expiresAt
-]));
+    seller.sellAmount
+]);
+bytes32 sellerHash = bytes32(PoseidonT4.hash([h1, seller.minBuyAmount, seller.expiresAt]));
 require(sellerHash == sellerC.orderHash, "Seller hash mismatch");
 ```
 
-On-chain Poseidon costs ~100k gas per hash — acceptable for a fallback path. The `poseidon-solidity` library is battle-tested (used by Tornado Cash, Semaphore, WorldID).
+On-chain Poseidon costs ~200k gas total (two calls at ~100k each) — acceptable for a fallback path. The `poseidon-solidity` library is battle-tested, derives its round constants from circomlibjs v0.0.8, and has cross-implementation tests verifying identical outputs.
 
 ---
 
@@ -738,12 +746,14 @@ User fills order form: SELL 1000 USDC for ≥ 0.5 WETH, expires in 24h
   │      const orderId = BigInt(raw) & ((1n << 253n) - 1n);  // always < SNARK_SCALAR_FIELD
   │      // 253-bit IDs give ~10^76 unique values — collision probability is effectively zero
   │
-  │   2. Compute orderHash using Poseidon (ZK-friendly, enables private settlement):
+  │   2. Compute orderHash using nested Poseidon (ZK-friendly, enables private settlement):
   │      import { buildPoseidon } from 'circomlibjs';
   │      const poseidon = await buildPoseidon();
-  │      const hash = poseidon([orderId, userAddress, USDC_ADDR, WETH_ADDR, 1000e6, 0.5e18, expiresAt]);
+  │      const h1 = poseidon([orderId, userAddress, USDC_ADDR, WETH_ADDR, 1000e6]);  // 5 inputs
+  │      const hash = poseidon([h1, 0.5e18, expiresAt]);                              // 3 inputs
   │      const orderHash = '0x' + poseidon.F.toString(hash, 16).padStart(64, '0');
-  │      // Poseidon output is a field element (~254 bits), always < SNARK_SCALAR_FIELD
+  │      // Nested Poseidon: PoseidonT6(5 inputs) → PoseidonT4(3 inputs)
+  │      // Matches on-chain PoseidonT6.sol + PoseidonT4.sol exactly
   │
   │   3. Check USDC allowance for Router:
   │      IF insufficient → *** WALLET POPUP *** approve(ROUTER, MaxUint256)
