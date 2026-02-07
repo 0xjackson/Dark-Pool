@@ -16,9 +16,42 @@ const BATCH_SIZE = 10;
 const ROUTER_ADDRESS = process.env.ROUTER_ADDRESS as Address | undefined;
 
 const ROUTER_ABI = [
-  'function proveAndSettle(bytes32 sellerOrderId, bytes32 buyerOrderId, uint256 sellerFillAmount, uint256 buyerFillAmount, uint256 proofTimestamp, uint256[2] calldata a, uint256[2][2] calldata b, uint256[2] calldata c) external',
-  'function markFullySettled(bytes32 orderId) external',
-  'function commitments(bytes32) view returns (address user, bytes32 orderHash, uint256 timestamp, uint256 settledAmount, uint8 status)',
+  {
+    name: 'proveAndSettle',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'sellerOrderId', type: 'bytes32' },
+      { name: 'buyerOrderId', type: 'bytes32' },
+      { name: 'sellerFillAmount', type: 'uint256' },
+      { name: 'buyerFillAmount', type: 'uint256' },
+      { name: 'proofTimestamp', type: 'uint256' },
+      { name: 'a', type: 'uint256[2]' },
+      { name: 'b', type: 'uint256[2][2]' },
+      { name: 'c', type: 'uint256[2]' },
+    ],
+    outputs: [],
+  },
+  {
+    name: 'markFullySettled',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'orderId', type: 'bytes32' }],
+    outputs: [],
+  },
+  {
+    name: 'commitments',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: '', type: 'bytes32' }],
+    outputs: [
+      { name: 'user', type: 'address' },
+      { name: 'orderHash', type: 'bytes32' },
+      { name: 'timestamp', type: 'uint256' },
+      { name: 'settledAmount', type: 'uint256' },
+      { name: 'status', type: 'uint8' },
+    ],
+  },
 ] as const;
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
