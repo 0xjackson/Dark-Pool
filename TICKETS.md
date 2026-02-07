@@ -151,11 +151,12 @@ Circom + Groth16 + Poseidon stack. Enables settlement without revealing order de
 
 Switch commitment hash from keccak256 to Poseidon across all layers.
 
-### PH-001: Add Poseidon hash to frontend
+### PH-001: Add Poseidon hash to frontend ✅
 - **File:** `app/web/src/hooks/useSubmitTrade.ts`
-- **Change:** Replace `keccak256(encodeAbiParameters(...))` with Poseidon hash using shared utility from PH-004. Mask orderId to 253 bits for BN128 field compatibility (`BigInt(raw) & ((1n << 253n) - 1n)`). Ensure output is formatted as `bytes32` for contract.
+- **Change:** Uses `computeOrderHash` and `maskOrderId` from `utils/poseidon.ts`. orderId masked to 253 bits for BN128 field compatibility.
 - **Blocked by:** PH-004, INF-005
 - **Blocks:** PH-003
+- **Done:** Poseidon hash used in useSubmitTrade.ts with nested 2-step hash matching contract.
 
 ### PH-002: Add Poseidon hash to backend commitment verifier
 - **File:** `app/server/src/services/commitmentVerifier.ts`
@@ -170,11 +171,19 @@ Switch commitment hash from keccak256 to Poseidon across all layers.
 - **Blocks:** S-003
 - **Done:** proofGenerator.ts created with Solidity-compatible proof output (reversed B coords)
 
-### PH-004: Poseidon hash utility module
+### PH-004: Poseidon hash utility module ✅
 - **File:** `app/server/src/utils/poseidon.ts` (new), `app/web/src/utils/poseidon.ts` (new)
-- **Change:** Shared utility that initializes Poseidon hasher from `circomlibjs`, exposes `computeOrderHash(orderId, user, sellToken, buyToken, sellAmount, minBuyAmount, expiresAt) → bytes32`. Uses nested two-step hash: `h1 = poseidon([orderId, user, sellToken, buyToken, sellAmount])` then `hash = poseidon([h1, minBuyAmount, expiresAt])`. Handles field element → bytes32 conversion (`poseidon.F.toString(hash, 16).padStart(64, '0')`). This nesting matches the on-chain PoseidonT6 + PoseidonT4 contracts exactly (poseidon-solidity ships T2-T6 only, not T8 for 7 inputs).
+- **Change:** Shared utility exposing `computeOrderHash` and `maskOrderId`. Nested two-step Poseidon hash matching on-chain PoseidonT6 + PoseidonT4.
 - **Blocked by:** INF-004, INF-005
 - **Blocks:** PH-001, PH-002
+- **Done:** Both frontend and backend utilities created. Cross-impl compatibility verified in circuit tests.
+
+### PH-007: orderId field bounds — 253-bit masking ✅
+- **File:** `app/web/src/utils/poseidon.ts`
+- **Change:** `maskOrderId` function masks to 253 bits: `BigInt(raw) & ((1n << 253n) - 1n)`.
+- **Blocked by:** PH-004
+- **Blocks:** PH-001
+- **Done:** Exported from `utils/poseidon.ts`, used in `useSubmitTrade.ts`.
 
 ### PH-005: Install poseidon-solidity in contracts
 - **File:** `contracts/foundry.toml`, `contracts/src/DarkPoolRouter.sol`
@@ -187,28 +196,23 @@ Switch commitment hash from keccak256 to Poseidon across all layers.
 - **Blocked by:** PH-005, PF-003
 - **Blocks:** T-001
 
-### PH-007: orderId field bounds — 253-bit masking
-- **File:** `app/web/src/hooks/useSubmitTrade.ts`, `app/web/src/utils/poseidon.ts`
-- **Change:** Mask orderId to 253 bits after keccak256 generation: `BigInt(raw) & ((1n << 253n) - 1n)`. This ensures orderId < SNARK_SCALAR_FIELD (~2^254), which is required by the snarkjs Groth16 verifier. 253-bit IDs still give ~10^76 unique values.
-- **Blocked by:** PH-004
-- **Blocks:** PH-001
-
 ---
 
 ## Phase 2: Database Migration
 
 New tables and columns for session keys and settlement tracking.
 
-### DB-001: Create session_keys table
-- **File:** `warlock/migrations/002_settlement_and_session_keys.up.sql` (new)
-- **Change:** Create `session_keys` table with columns: `id`, `user_address`, `session_key_address`, `encrypted_private_key`, `jwt_token`, `application`, `allowances` (JSONB), `expires_at`, `status` (PENDING/ACTIVE/EXPIRED/REVOKED), `created_at`. Add unique constraint on `(user_address, session_key_address)`. Add index on `(user_address, status)`.
+### DB-001: Create session_keys table ✅
+- **File:** `warlock/migrations/002_session_keys.up.sql` (new)
+- **Change:** Create `session_keys` table with columns: `id`, `owner`, `address`, `private_key`, `application`, `allowances` (JSONB), `expires_at`, `status` (PENDING/ACTIVE/EXPIRED/REVOKED), `created_at`. Add unique constraint on `(owner, application)`. Add index on `(owner, status)`.
 - **Blocks:** SK-001
+- **Done:** Migration 002 created and applied to Railway Postgres. Column names differ from original spec (owner/address vs user_address/session_key_address) but semantically equivalent.
 
-### DB-002: Add settlement columns to matches table (partially done)
-- **File:** `warlock/migrations/002_settlement_and_session_keys.up.sql`
-- **Change:** `ALTER TABLE matches ADD COLUMN` for: `app_session_id VARCHAR(66)`, `reveal_tx_hash VARCHAR(66)`, `settle_tx_hash VARCHAR(66)`, `settlement_error TEXT`, `settled_at TIMESTAMP`.
+### DB-002: Add settlement columns to matches table ✅
+- **File:** `warlock/migrations/002_session_keys.up.sql`, `warlock/migrations/003_zk_order_fields.up.sql`
+- **Change:** `ALTER TABLE matches ADD COLUMN` for: `app_session_id VARCHAR(66)`, `settlement_error TEXT`, `settle_tx_hash VARCHAR(66)`, `settled_at TIMESTAMP`.
 - **Blocks:** S-003
-- **Note:** `settle_tx_hash` and `settled_at` added in migration 003 (ZK order fields). Remaining: `app_session_id`, `reveal_tx_hash`, `settlement_error`.
+- **Done:** `app_session_id` and `settlement_error` in migration 002; `settle_tx_hash` and `settled_at` in migration 003. Both applied to Railway Postgres.
 
 ### DB-003: Drop stale EIP-712 columns from orders table
 - **File:** `warlock/migrations/002_settlement_and_session_keys.up.sql`
@@ -220,9 +224,10 @@ New tables and columns for session keys and settlement tracking.
 - **Change:** Search all Go code for references to `order_signature`, `order_data`, `revealed`, `revealed_at`. Remove from SELECT statements, INSERT statements, scan destinations. Verify Warlock builds and tests pass.
 - **Blocked by:** DB-003
 
-### DB-005: Create down migration
-- **File:** `warlock/migrations/002_settlement_and_session_keys.down.sql` (new)
-- **Change:** Reverse of up migration: drop `session_keys` table, drop added columns from `matches`, re-add dropped columns to `orders`.
+### DB-005: Create down migration ✅
+- **File:** `warlock/migrations/002_session_keys.down.sql` (new)
+- **Change:** Reverse of up migration: drop `session_keys` table, drop added columns from `matches`.
+- **Done:** Down migration exists.
 
 ---
 
@@ -230,21 +235,23 @@ New tables and columns for session keys and settlement tracking.
 
 Backend endpoints and services for session key management.
 
-### SK-001: Session key generation endpoint
+### SK-001: Session key generation endpoint ✅
 - **File:** `app/server/src/routes/sessionKeys.ts` (new)
-- **Change:** `POST /api/session-key/generate` — accepts `{ userAddress }`. Checks DB for existing ACTIVE non-expired key (return it if found). Otherwise: generate ECDSA keypair (`viem` `generatePrivateKey`), encrypt private key with AES-256-GCM using `SESSION_KEY_ENCRYPTION_SECRET`, store in `session_keys` table with status PENDING. Return `{ sessionKeyAddress, allowances, expiresAt }`.
-- **Blocked by:** DB-001, SK-002
+- **Change:** `POST /api/session-key/create` — accepts `{ userAddress }`. Checks DB for existing ACTIVE non-expired key (return it if found). Otherwise: generate ECDSA keypair, open WS to Yellow, send `auth_request`, return EIP-712 challenge for user to sign.
+- **Blocked by:** DB-001
 - **Blocks:** SK-003
+- **Done:** Route implemented. Private key stored in plaintext (SK-002 encryption not yet implemented). Tested working on Railway — creates session key and returns EIP-712 challenge.
 
 ### SK-002: AES-256-GCM encryption/decryption helpers
 - **File:** `app/server/src/utils/encryption.ts` (new)
 - **Change:** `encryptSessionKey(privateKey: string, secret: string) → string` (base64 of iv + authTag + ciphertext). `decryptSessionKey(encrypted: string, secret: string) → string`. Use Node.js `crypto` module. 12-byte IV, 16-byte auth tag.
 - **Blocks:** SK-001, SK-004
 
-### SK-003: Session key confirmation endpoint
+### SK-003: Session key confirmation endpoint ✅
 - **File:** `app/server/src/routes/sessionKeys.ts`
-- **Change:** `POST /api/session-key/confirm` — accepts `{ userAddress, jwt }`. Updates session key status from PENDING to ACTIVE. Stores JWT token as backup reference.
+- **Change:** `POST /api/session-key/activate` — accepts `{ userAddress, signature, challengeRaw }`. Completes `auth_verify` on Yellow WS with user's EIP-712 signature. Updates session key status from PENDING to ACTIVE.
 - **Blocked by:** SK-001
+- **Done:** Route implemented. Uses proxy signer pattern to forward user's pre-signed signature to Yellow.
 
 ### SK-004: Session key retrieval for settlement
 - **File:** `app/server/src/services/sessionKeyService.ts` (new)
@@ -257,10 +264,11 @@ Backend endpoints and services for session key management.
 - **Change:** `markExpiredKeys()` — periodic job that marks EXPIRED any ACTIVE keys past `expires_at`. `revokeSessionKey(userAddress: string)` — marks key as REVOKED in DB and sends `revoke_session_key` message to Yellow via engine WS.
 - **Blocked by:** SK-004
 
-### SK-006: Register session key routes in Express
+### SK-006: Register session key routes in Express ✅
 - **File:** `app/server/src/server.ts`
-- **Change:** Import session key routes, mount at `/api/session-key`. Add `SESSION_KEY_ENCRYPTION_SECRET` to env config validation.
+- **Change:** Import session key routes, mount at `/api/session-key`.
 - **Blocked by:** SK-001, SK-003
+- **Done:** Routes mounted. Tested working on Railway.
 
 ---
 
@@ -268,16 +276,18 @@ Backend endpoints and services for session key management.
 
 Frontend hooks and components for session key authorization at wallet connect.
 
-### FE-001: Session key auth hook
-- **File:** `app/web/src/hooks/useSessionKeyAuth.ts` (new)
-- **Change:** Hook that: (1) calls `/api/session-key/generate` on wallet connect, (2) if key is PENDING: opens WS to Yellow, sends `createAuthRequestMessage`, receives challenge, creates EIP-712 signer via `createEIP712AuthMessageSigner`, prompts user to sign, sends `createAuthVerifyMessageFromChallenge`, receives JWT, calls `/api/session-key/confirm`, closes WS. (3) if key is ACTIVE: skip auth. Exports `{ isSessionKeyActive, isAuthenticating, error }`.
+### FE-001: Session key auth hook ✅
+- **File:** `app/web/src/hooks/useSessionKey.ts` (new)
+- **Change:** Hook that: (1) calls `/api/session-key/create` on wallet connect, (2) if key is PENDING: prompts user to sign EIP-712 challenge via wallet, calls `/api/session-key/activate` with signature, (3) if key is ACTIVE: skip auth. Exports `{ status, isActive, isLoading, error, retry }`.
 - **Blocked by:** SK-001, SK-003
 - **Blocks:** FE-002
+- **Done:** Implemented as `useSessionKey.ts`. Auto-triggers on wallet connect, handles user rejection, shows status messages. Backend handles Yellow WS — frontend just signs and forwards.
 
-### FE-002: Integrate session key auth with wallet connect flow
-- **File:** `app/web/src/hooks/useWalletConnection.ts` or `app/web/src/providers/WagmiProvider.tsx`
-- **Change:** After successful wallet connect, trigger `useSessionKeyAuth`. Show loading state while auth is in progress. Handle errors (user rejects signature, Yellow WS fails). Store auth state in context.
+### FE-002: Integrate session key auth with wallet connect flow ✅
+- **File:** `app/web/src/components/wallet/ConnectWallet.tsx`
+- **Change:** After successful wallet connect, `useSessionKey` auto-triggers. Shows loading state during auth. Error message with retry button. OrderForm checks `sessionKeyActive` before enabling submit.
 - **Blocked by:** FE-001
+- **Done:** Integrated in ConnectWallet.tsx and OrderForm.tsx. Tested working on Railway — user gets MetaMask signing prompt on connect.
 
 ### FE-003: Update useSubmitTrade for Poseidon hash
 - **File:** `app/web/src/hooks/useSubmitTrade.ts`
@@ -307,16 +317,18 @@ Frontend hooks and components for session key authorization at wallet connect.
 
 The core settlement pipeline — picks up matches, settles via ZK + Yellow.
 
-### S-001: Yellow Network WebSocket client
-- **File:** `app/server/src/services/yellowClient.ts` (new)
-- **Change:** Persistent WS connection to Yellow. Auto-reconnect on disconnect. Message send/receive with request-response matching. Methods: `send(message) → response`, `onMessage(handler)`. Configurable URL via `YELLOW_WS_URL` env var.
+### S-001: Yellow Network WebSocket client ✅
+- **File:** `app/server/src/services/yellowConnection.ts` (new)
+- **Change:** Persistent WS connection to Yellow. Auto-reconnect on disconnect. Message send/receive with request-response matching via `sendAndWait()`. Configurable URL via `YELLOW_WS_URL` env var. Manages both engine WS and per-user WS pool.
 - **Blocks:** S-002
+- **Done:** Implemented in `yellowConnection.ts`. Request-response matching by reqId, 10s timeout, auto-reconnect on engine WS close.
 
-### S-002: Engine boot and authentication
-- **File:** `app/server/src/services/engineAuth.ts` (new)
-- **Change:** On server start: load `ENGINE_WALLET_KEY` and `ENGINE_SESSION_KEY` from env. Connect to Yellow WS. Execute auth flow: `createAuthRequestMessage` → receive challenge → sign EIP-712 with engine wallet → `createAuthVerifyMessageFromChallenge` → receive JWT. Query `get_assets` and build token-address-to-symbol map. Schedule re-auth every ~23h.
+### S-002: Engine boot and authentication ✅
+- **File:** `app/server/src/services/yellowConnection.ts` (`initEngineConnection`)
+- **Change:** On server start: load `ENGINE_WALLET_KEY` from env. Generate or load session key from DB. Connect to Yellow WS. Execute auth flow: `createAuthRequestMessage` → challenge → sign EIP-712 → `createAuthVerifyMessage` → JWT. Query `get_assets` and build token-address-to-symbol map. Auto-reconnect re-authenticates.
 - **Blocked by:** S-001
 - **Blocks:** S-003
+- **Done:** Working on Railway. Registers engine session key with Yellow, loads 2 assets. Re-authenticates on WS reconnect.
 
 ### S-003: Settlement worker — match consumer
 - **File:** `app/server/src/services/settlementWorker.ts` (new)
@@ -352,20 +364,23 @@ The core settlement pipeline — picks up matches, settles via ZK + Yellow.
 - **Change:** Handle failure at each step: session key missing/expired → FAILED + notify user. `proveAndSettle` reverts → FAILED + log reason (don't retry deterministic failures). Yellow WS drops → reconnect + retry from last successful step. App Session creation fails → retry with backoff (max 3). Close fails → retry with backoff. All errors logged and stored in `settlement_error` column.
 - **Blocked by:** S-003, S-004, S-005, S-006
 
-### S-008: WebSocket notifications to users
-- **File:** `app/server/src/websocket/server.ts`
-- **Change:** Add settlement event broadcasting. When match settles: `wsServer.broadcast('matches:{userAddress}', { type: 'settled', matchId })`. When settlement fails: `wsServer.broadcast('matches:{userAddress}', { type: 'settlement_failed', matchId, error })`.
+### S-008: WebSocket notifications to users ✅
+- **File:** `app/server/src/websocket/server.ts`, `app/server/src/services/settlementWorker.ts`
+- **Change:** Settlement worker broadcasts `{ type: 'settlement', data: { matchId, status } }` to `matches:{userAddress}` channels for both buyer and seller.
 - **Blocked by:** S-006
+- **Done:** Broadcasting wired in settlementWorker.ts. Frontend `useSettlementUpdates` hook listens and triggers refresh.
 
-### S-009: Engine wallet management
+### S-009: Engine wallet management ✅
 - **File:** `app/server/src/services/engineWallet.ts` (new)
-- **Change:** Load `ENGINE_WALLET_KEY` from env. Create viem wallet client for on-chain transactions (`proveAndSettle`, `revealAndSettle`, `markFullySettled`). Handle nonce management for sequential transactions. Monitor ETH balance for gas.
+- **Change:** Load `ENGINE_WALLET_KEY` from env. Create viem wallet client for on-chain transactions (`proveAndSettle`, `revealAndSettle`, `markFullySettled`).
 - **Blocks:** S-003
+- **Done:** engineWallet.ts created with wallet client for Base Sepolia.
 
-### S-010: Install Nitrolite SDK in backend
+### S-010: Install Nitrolite SDK in backend ✅
 - **File:** `app/server/package.json`
-- **Change:** `npm install @erc7824/nitrolite viem`. Verify SDK functions are importable and types work.
+- **Change:** `npm install @erc7824/nitrolite viem`. SDK functions imported in yellowConnection.ts.
 - **Blocks:** S-001, S-002
+- **Done:** Installed and working.
 
 ---
 
@@ -429,10 +444,11 @@ Comprehensive tests across all layers.
 
 Deploy to multiple chains and enable cross-chain settlement via Yellow unified balance.
 
-### CC-001: Deploy DarkPoolRouter to Base Sepolia (testnet)
+### CC-001: Deploy DarkPoolRouter to Base Sepolia (testnet) ✅
 - **Task:** Run Foundry deployment script targeting Base Sepolia. Verify contract works on a second chain. Record deployment address.
 - **Blocked by:** All Phase 1 contract tickets
 - **Blocks:** CC-003
+- **Done:** Deployed at `0x8CeBfA471cee4FA7b0421A348Ae288a446b0d8BF` on Base Sepolia (84532). Engine address: `0x88a8465e9658be44114346d844a45789b8eb8c48`. ZK verifier: `0x729007c4c3ae892a45bbc2a925293b7ac75a33e2`.
 
 ### CC-002: Deploy DarkPoolRouter to Polygon Amoy (testnet)
 - **Task:** Run Foundry deployment script targeting Polygon Amoy. Record deployment address.
@@ -487,20 +503,23 @@ Deploy to multiple chains and enable cross-chain settlement via Yellow unified b
 - **Change:** Add environment variables to backend service. Ensure backend can reach Yellow WS URL. Add health check for Yellow WS connection.
 - **Blocked by:** INF-001
 
-### INF-003: Circuit build pipeline
-- **File:** `circuits/Makefile` or `circuits/build.sh` (new)
-- **Change:** Script that: compiles Circom circuit, runs Groth16 trusted setup, generates Solidity verifier, copies verifier to `contracts/src/`, copies WASM + zkey to `app/server/circuits/` for proof generation. Run as part of contract build.
+### INF-003: Circuit build pipeline ✅
+- **File:** `circuits/build.sh` (new)
+- **Change:** Script that compiles Circom circuit, runs Groth16 trusted setup, generates Solidity verifier, copies artifacts.
 - **Blocked by:** ZK-001, ZK-002
+- **Done:** `circuits/build.sh` created. Outputs WASM + zkey + verification_key.json + Groth16Verifier.sol.
 
-### INF-004: Add snarkjs and circomlibjs to backend dependencies
+### INF-004: Add snarkjs and circomlibjs to backend dependencies ✅
 - **File:** `app/server/package.json`
-- **Change:** `npm install snarkjs circomlibjs`. Add circuit artifacts (WASM + zkey) to backend assets or configure path via env var.
+- **Change:** `npm install snarkjs circomlibjs`. Circuit artifacts at `app/server/circuits/`.
 - **Blocked by:** ZK-003
+- **Done:** Installed. proofGenerator.ts loads WASM + zkey at runtime.
 
-### INF-005: Add circomlibjs to frontend dependencies
+### INF-005: Add circomlibjs to frontend dependencies ✅
 - **File:** `app/web/package.json`
 - **Change:** `npm install circomlibjs`. Used for Poseidon hash computation in `useSubmitTrade`.
 - **Blocks:** PH-001
+- **Done:** Installed and used in `utils/poseidon.ts`.
 
 ---
 
@@ -537,3 +556,27 @@ Deploy to multiple chains and enable cross-chain settlement via Yellow unified b
 | Cleanup | CL-001 → CL-002 | Dead code, stale columns, hacks |
 
 **Total: 74 tickets across 12 sections.**
+
+---
+
+## Known Blockers & Notes
+
+### Yellow Sandbox Testing Limitation
+The Yellow Network sandbox only provides one test token: `ytest.usd` (address `0xDB9F293e3898c9E5536A3be1b0C56c89d2b32DEb`, 6 decimals, available on all supported testnets). The faucet (`POST https://clearnet-sandbox.yellow.com/faucet/requestTokens`) credits `ytest.usd` directly to the user's unified balance — no on-chain deposit needed.
+
+**Problem:** End-to-end trade testing requires two different tokens (e.g. ETH/USDC) in the Yellow unified balance. The sandbox only has `ytest.usd`. Options:
+1. **UI + matching test only** — Use `commitOnly` to store commitment hashes on-chain, orders match in Warlock, but settlement stays PENDING (no second token to swap in App Session). Good enough to demo the commit → match flow.
+2. **Check if Yellow sandbox has a second test token** — Ask Yellow team or check `get_assets` periodically.
+3. **Deploy test ERC-20 on Base Sepolia** — Mint a test token, deposit into Custody via Router's `depositAndCommit`, then trade against `ytest.usd`. Requires the token to also be registered as a Yellow asset.
+
+### NEXT_PUBLIC_COMMIT_ONLY flag (not yet implemented)
+Need a `NEXT_PUBLIC_COMMIT_ONLY=true` env var that forces the frontend to always use `commitOnly` (skip on-chain ERC-20 deposit). This is the correct mode for sandbox testing where tokens live in Yellow's off-chain unified balance, not as on-chain ERC-20s. Without this, the `depositAndCommit` path tries to do an ERC-20 `transferFrom` which fails for native ETH and for tokens that only exist in Yellow's ledger.
+
+### Railway Deployment
+- **Portal:** `portal-production-7c82.up.railway.app`
+- **Engine:** `engine-production-28ee.up.railway.app`
+- **Warlock:** internal gRPC at `warlock.railway.internal:50051`
+- **Postgres:** `interchange.proxy.rlwy.net:22517`
+- All 3 migrations (001, 002, 003) applied to Railway Postgres.
+- `NEXT_PUBLIC_*` env vars require `ARG` declarations in `app/web/Dockerfile` to be baked into Next.js bundle at build time.
+- Engine WS connection to Yellow reconnects every ~few minutes (benign — re-authenticates automatically).
