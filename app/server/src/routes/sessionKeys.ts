@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
-import { Hex, Address } from 'viem';
+import { Hex, Address, getAddress } from 'viem';
 import { generateSessionKey } from '../utils/keygen';
 import {
   getUserWs,
@@ -31,7 +31,7 @@ router.post('/create', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'userAddress is required' });
     }
 
-    const addr = userAddress.toLowerCase();
+    const addr = getAddress(userAddress as Address);
 
     // Check for existing active key
     const existing = await db.query(
@@ -116,7 +116,7 @@ router.post('/activate', async (req: Request, res: Response) => {
       });
     }
 
-    const addr = userAddress.toLowerCase();
+    const addr = getAddress(userAddress as Address);
 
     // Verify the user has a PENDING session key
     const pending = await db.query(
@@ -169,7 +169,7 @@ router.post('/revoke', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'userAddress is required' });
     }
 
-    const addr = userAddress.toLowerCase();
+    const addr = getAddress(userAddress as Address);
 
     // Load key from DB
     const keyRow = await db.query(

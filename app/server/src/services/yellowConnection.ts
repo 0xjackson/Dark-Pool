@@ -273,7 +273,7 @@ export async function openUserWs(
   allowances: Array<{ asset: string; amount: string }>,
 ): Promise<WebSocket> {
   // Close existing if any
-  const existingWs = userWsPool.get(userAddress.toLowerCase());
+  const existingWs = userWsPool.get(getAddress(userAddress as Address));
   if (existingWs && existingWs.readyState === WebSocket.OPEN) {
     return existingWs;
   }
@@ -284,16 +284,16 @@ export async function openUserWs(
   await authenticateWs(ws, walletKey, sessionKeyAddress, 'dark-pool', expiresAt, allowances);
 
   ws.on('close', () => {
-    userWsPool.delete(userAddress.toLowerCase());
+    userWsPool.delete(getAddress(userAddress as Address));
     console.log(`User WS closed: ${userAddress}`);
   });
 
-  userWsPool.set(userAddress.toLowerCase(), ws);
+  userWsPool.set(getAddress(userAddress as Address), ws);
   return ws;
 }
 
 export function getUserWs(userAddress: string): WebSocket | undefined {
-  const ws = userWsPool.get(userAddress.toLowerCase());
+  const ws = userWsPool.get(getAddress(userAddress as Address));
   if (ws && ws.readyState === WebSocket.OPEN) return ws;
   return undefined;
 }
@@ -333,10 +333,10 @@ export async function authenticateUserWs(
   const challengeParsed = parseAuthChallengeResponse(challengeRaw);
 
   ws.on('close', () => {
-    userWsPool.delete(userAddress.toLowerCase());
+    userWsPool.delete(getAddress(userAddress as Address));
   });
 
-  userWsPool.set(userAddress.toLowerCase(), ws);
+  userWsPool.set(getAddress(userAddress as Address), ws);
 
   // Build EIP-712 typed data for the frontend to sign
   const eip712 = {

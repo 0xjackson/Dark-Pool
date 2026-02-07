@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { Hex, Address } from 'viem';
+import { Hex, Address, getAddress } from 'viem';
 import {
   getAssetSymbol,
   getEngineAddress,
@@ -338,11 +338,12 @@ async function loadOrderDetails(orderId: string) {
 }
 
 async function loadSessionKey(owner: string): Promise<{ address: string; private_key: string } | null> {
+  const checksummed = owner === 'warlock' ? owner : getAddress(owner as Address);
   const result = await db.query(
     `SELECT address, private_key FROM session_keys
      WHERE owner = $1 AND status = 'ACTIVE' AND expires_at > NOW()
      LIMIT 1`,
-    [owner],
+    [checksummed],
   );
   return result.rows[0] || null;
 }

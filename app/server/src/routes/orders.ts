@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { getWarlockClient } from '../services/warlockClient';
 import { verifyCommitment } from '../services/commitmentVerifier';
 import { Pool } from 'pg';
+import { getAddress, Address } from 'viem';
 
 const router = Router();
 
@@ -62,6 +63,9 @@ router.post('/', async (req: Request, res: Response) => {
       });
     }
 
+    // Checksum the user address
+    const checksummedAddress = getAddress(user_address as Address);
+
     // Validate order type
     if (order_type !== 'BUY' && order_type !== 'SELL') {
       return res.status(400).json({
@@ -80,7 +84,7 @@ router.post('/', async (req: Request, res: Response) => {
     // Verify on-chain commitment matches submitted details
     const verificationError = await verifyCommitment(
       order_id,
-      user_address,
+      checksummedAddress,
       order_type,
       base_token,
       quote_token,
@@ -99,7 +103,7 @@ router.post('/', async (req: Request, res: Response) => {
     // Submit order to Warlock matching engine
     const warlockClient = getWarlockClient();
     const result = await warlockClient.submitOrder({
-      user_address,
+      user_address: checksummedAddress,
       chain_id,
       order_type,
       base_token,
@@ -132,7 +136,7 @@ router.post('/', async (req: Request, res: Response) => {
  */
 router.get('/user/:address', async (req: Request, res: Response) => {
   try {
-    const { address } = req.params;
+    const address = getAddress(req.params.address as Address);
     const { status, limit = 50, offset = 0 } = req.query;
 
     let query = `
@@ -177,7 +181,7 @@ router.get('/user/:address', async (req: Request, res: Response) => {
  */
 router.get('/matches/user/:address', async (req: Request, res: Response) => {
   try {
-    const { address } = req.params;
+    const address = getAddress(req.params.address as Address);
     const { limit = 50, offset = 0 } = req.query;
 
     const result = await db.query(
@@ -250,7 +254,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
 
     // Cancel order via Warlock
     const warlockClient = getWarlockClient();
-    const result = await warlockClient.cancelOrder(id, user_address);
+    const result = await warlockClient.cancelOrder(id, getAddress(user_address as Address));
 
     res.json(result);
   } catch (error: any) {
