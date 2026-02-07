@@ -115,6 +115,7 @@ router.post('/', async (req: Request, res: Response) => {
       order_id,
       sell_amount,
       min_buy_amount,
+      expires_in_seconds: expires_at,
     });
 
     res.status(201).json({

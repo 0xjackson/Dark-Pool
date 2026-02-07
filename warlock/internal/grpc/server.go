@@ -101,9 +101,11 @@ func (s *Server) SubmitOrder(ctx context.Context, req *pb.SubmitOrderRequest) (*
 	maxPrice := price.Mul(decimal.NewFromInt(1).Add(varianceFactor))
 
 	// Calculate expiration time
+	// ExpiresInSeconds carries the absolute Unix timestamp from the frontend
+	// (the same value baked into the Poseidon commitment hash)
 	var expiresAt time.Time
 	if req.ExpiresInSeconds > 0 {
-		expiresAt = time.Now().Add(time.Duration(req.ExpiresInSeconds) * time.Second)
+		expiresAt = time.Unix(req.ExpiresInSeconds, 0)
 	}
 
 	// Create order in database
