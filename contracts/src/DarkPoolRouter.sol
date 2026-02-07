@@ -98,13 +98,15 @@ contract DarkPoolRouter {
     /// orderHash = Poseidon(h1, minBuyAmount, expiresAt)
     /// Matches frontend circomlibjs computation with same nested structure.
     function _computeOrderHash(OrderDetails calldata o) internal pure returns (bytes32) {
-        uint256 h1 = PoseidonT6.hash([
-            uint256(o.orderId),
-            uint256(uint160(o.user)),
-            uint256(uint160(o.sellToken)),
-            uint256(uint160(o.buyToken)),
-            o.sellAmount
-        ]);
+        uint256 h1 = PoseidonT6.hash(
+            [
+                uint256(o.orderId),
+                uint256(uint160(o.user)),
+                uint256(uint160(o.sellToken)),
+                uint256(uint160(o.buyToken)),
+                o.sellAmount
+            ]
+        );
         return bytes32(PoseidonT4.hash([h1, o.minBuyAmount, o.expiresAt]));
     }
 
@@ -221,14 +223,8 @@ contract DarkPoolRouter {
         // Rearranged to avoid division:
         //   buyerFillAmount / sellerFillAmount >= seller.minBuyAmount / seller.sellAmount
         //   buyerFillAmount * seller.sellAmount >= sellerFillAmount * seller.minBuyAmount
-        require(
-            buyerFillAmount * seller.sellAmount >= sellerFillAmount * seller.minBuyAmount,
-            "Seller slippage"
-        );
-        require(
-            sellerFillAmount * buyer.sellAmount >= buyerFillAmount * buyer.minBuyAmount,
-            "Buyer slippage"
-        );
+        require(buyerFillAmount * seller.sellAmount >= sellerFillAmount * seller.minBuyAmount, "Seller slippage");
+        require(sellerFillAmount * buyer.sellAmount >= buyerFillAmount * buyer.minBuyAmount, "Buyer slippage");
 
         // Update settled amounts (order stays Active for more partial fills)
         sellerC.settledAmount += sellerFillAmount;

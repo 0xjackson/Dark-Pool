@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { useAccount, useChainId, usePublicClient, useWalletClient } from 'wagmi';
 import { keccak256, encodeAbiParameters, parseUnits, maxUint256 } from 'viem';
+import { computeOrderHash, maskOrderId } from '@/utils/poseidon';
 import { OrderFormData } from '@/types/trading';
 import { OrderRequest, TradeSubmitStep } from '@/types/order';
 import { submitOrder as apiSubmitOrder } from '@/services/api';
@@ -70,27 +71,19 @@ export function useSubmitTrade(): UseSubmitTradeReturn {
         const minBuyAmount = rawBuyAmount - (rawBuyAmount * BigInt(varianceBps)) / 10000n;
 
         const expiresAt = BigInt(Math.floor(Date.now() / 1000) + 3600); // 1 hour
-        const orderId = keccak256(
+
+        // Generate orderId — masked to 253 bits for BN128 field compatibility
+        const rawOrderId = keccak256(
           encodeAbiParameters(
             [{ type: 'address' }, { type: 'uint256' }, { type: 'uint256' }],
             [address, sellAmount, expiresAt]
           )
         );
+        const orderId = maskOrderId(rawOrderId);
 
-        // Compute commitment hash matching contract's keccak256(abi.encode(OrderDetails))
-        const orderHash = keccak256(
-          encodeAbiParameters(
-            [
-              { type: 'bytes32' },
-              { type: 'address' },
-              { type: 'address' },
-              { type: 'address' },
-              { type: 'uint256' },
-              { type: 'uint256' },
-              { type: 'uint256' },
-            ],
-            [orderId, address, sellToken, buyToken, sellAmount, minBuyAmount, expiresAt]
-          )
+        // Compute nested Poseidon commitment hash (matches contract's _computeOrderHash)
+        const orderHash = await computeOrderHash(
+          orderId, address, sellToken, buyToken, sellAmount, minBuyAmount, expiresAt
         );
 
         // Step 1: Check allowance and approve if needed
