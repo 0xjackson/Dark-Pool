@@ -264,8 +264,26 @@ async function loadAssetMap(): Promise<void> {
   }
 }
 
+// Common representations of native ETH that should all resolve to the zero address
+const NATIVE_ETH_ALIASES = [
+  '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+  '0x0000000000000000000000000000000000000000',
+];
+
 export function getAssetSymbol(tokenAddress: string): string | undefined {
-  return assetMap.get(tokenAddress.toLowerCase());
+  const addr = tokenAddress.toLowerCase();
+  const result = assetMap.get(addr);
+  if (result) return result;
+
+  // Normalize native ETH aliases (frontend uses 0xeee..., Yellow uses 0x000...)
+  if (NATIVE_ETH_ALIASES.includes(addr)) {
+    for (const alias of NATIVE_ETH_ALIASES) {
+      const aliasResult = assetMap.get(alias);
+      if (aliasResult) return aliasResult;
+    }
+  }
+
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------
