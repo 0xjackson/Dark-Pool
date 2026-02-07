@@ -528,7 +528,9 @@ contract DarkPoolRouterTest is Test {
 
         // proveAndSettle with mock proof (full fill)
         vm.prank(engine);
-        router.proveAndSettle(SELLER_ORDER_ID, BUYER_ORDER_ID, 100 ether, 95 ether, dummyA, dummyB, dummyC);
+        router.proveAndSettle(
+            SELLER_ORDER_ID, BUYER_ORDER_ID, 100 ether, 95 ether, block.timestamp, dummyA, dummyB, dummyC
+        );
 
         // Verify settledAmount updated
         (,,, uint256 sellerSettled, DarkPoolRouter.Status sellerStatus) = router.commitments(SELLER_ORDER_ID);
@@ -561,7 +563,9 @@ contract DarkPoolRouterTest is Test {
 
         // First partial fill via ZK: 60/57
         vm.prank(engine);
-        router.proveAndSettle(SELLER_ORDER_ID, BUYER_ORDER_ID, 60 ether, 57 ether, dummyA, dummyB, dummyC);
+        router.proveAndSettle(
+            SELLER_ORDER_ID, BUYER_ORDER_ID, 60 ether, 57 ether, block.timestamp, dummyA, dummyB, dummyC
+        );
 
         (,,, uint256 sellerSettled, DarkPoolRouter.Status sellerStatus) = router.commitments(SELLER_ORDER_ID);
         assertEq(sellerSettled, 60 ether);
@@ -574,7 +578,9 @@ contract DarkPoolRouterTest is Test {
 
         // Second partial fill via ZK: 40/38
         vm.prank(engine);
-        router.proveAndSettle(SELLER_ORDER_ID, BUYER2_ORDER_ID, 40 ether, 38 ether, dummyA, dummyB, dummyC);
+        router.proveAndSettle(
+            SELLER_ORDER_ID, BUYER2_ORDER_ID, 40 ether, 38 ether, block.timestamp, dummyA, dummyB, dummyC
+        );
 
         (,,, sellerSettled,) = router.commitments(SELLER_ORDER_ID);
         assertEq(sellerSettled, 100 ether);
@@ -599,7 +605,9 @@ contract DarkPoolRouterTest is Test {
 
         vm.prank(engine);
         vm.expectRevert("Invalid proof");
-        rejectRouter.proveAndSettle(SELLER_ORDER_ID, BUYER_ORDER_ID, 100 ether, 95 ether, dummyA, dummyB, dummyC);
+        rejectRouter.proveAndSettle(
+            SELLER_ORDER_ID, BUYER_ORDER_ID, 100 ether, 95 ether, block.timestamp, dummyA, dummyB, dummyC
+        );
     }
 
     function test_RevertProveAndSettle_NotEngine() public {
@@ -612,7 +620,9 @@ contract DarkPoolRouterTest is Test {
 
         vm.prank(alice);
         vm.expectRevert("Only engine");
-        router.proveAndSettle(SELLER_ORDER_ID, BUYER_ORDER_ID, 100 ether, 95 ether, dummyA, dummyB, dummyC);
+        router.proveAndSettle(
+            SELLER_ORDER_ID, BUYER_ORDER_ID, 100 ether, 95 ether, block.timestamp, dummyA, dummyB, dummyC
+        );
     }
 
     function test_RevertProveAndSettle_SellerNotActive() public {
@@ -626,7 +636,9 @@ contract DarkPoolRouterTest is Test {
 
         vm.prank(engine);
         vm.expectRevert("Seller not active");
-        router.proveAndSettle(bytes32(uint256(1)), bytes32(uint256(3)), 100, 100, dummyA, dummyB, dummyC);
+        router.proveAndSettle(
+            bytes32(uint256(1)), bytes32(uint256(3)), 100, 100, block.timestamp, dummyA, dummyB, dummyC
+        );
     }
 
     // ============ NATIVE ETH DEPOSIT ============
@@ -677,6 +689,57 @@ contract DarkPoolRouterTest is Test {
         router.depositAndCommit{value: 1 ether}(NATIVE_ETH, 2 ether, oid, ohash);
     }
 
+    function test_ProveAndSettle_RecentTimestamp() public {
+        // Warp to realistic timestamp so subtraction doesn't underflow
+        vm.warp(10_000);
+        uint256 expiresAt = block.timestamp + 1 hours;
+        DarkPoolRouter.OrderDetails memory seller = _makeSellerOrder(100 ether, 90 ether, expiresAt);
+        DarkPoolRouter.OrderDetails memory buyer = _makeBuyerOrder(BUYER_ORDER_ID, bob, 95 ether, 90 ether, expiresAt);
+
+        _commitOrder(alice, address(tokenA), 100 ether, seller);
+        _commitOrder(bob, address(tokenB), 95 ether, buyer);
+
+        // Proof generated 2 minutes ago — within MAX_PROOF_AGE (300s). Should succeed.
+        uint256 proofTs = block.timestamp - 120;
+        vm.prank(engine);
+        router.proveAndSettle(SELLER_ORDER_ID, BUYER_ORDER_ID, 100 ether, 95 ether, proofTs, dummyA, dummyB, dummyC);
+
+        (,,, uint256 settled,) = router.commitments(SELLER_ORDER_ID);
+        assertEq(settled, 100 ether);
+    }
+
+    function test_RevertProveAndSettle_ProofTooOld() public {
+        // Warp to realistic timestamp so subtraction doesn't underflow
+        vm.warp(10_000);
+        uint256 expiresAt = block.timestamp + 1 hours;
+        DarkPoolRouter.OrderDetails memory seller = _makeSellerOrder(100 ether, 90 ether, expiresAt);
+        DarkPoolRouter.OrderDetails memory buyer = _makeBuyerOrder(BUYER_ORDER_ID, bob, 95 ether, 90 ether, expiresAt);
+
+        _commitOrder(alice, address(tokenA), 100 ether, seller);
+        _commitOrder(bob, address(tokenB), 95 ether, buyer);
+
+        // Proof generated 10 minutes ago — exceeds MAX_PROOF_AGE (300s)
+        uint256 proofTs = block.timestamp - 600;
+        vm.prank(engine);
+        vm.expectRevert("Proof too old");
+        router.proveAndSettle(SELLER_ORDER_ID, BUYER_ORDER_ID, 100 ether, 95 ether, proofTs, dummyA, dummyB, dummyC);
+    }
+
+    function test_RevertProveAndSettle_TimestampInFuture() public {
+        uint256 expiresAt = block.timestamp + 1 hours;
+        DarkPoolRouter.OrderDetails memory seller = _makeSellerOrder(100 ether, 90 ether, expiresAt);
+        DarkPoolRouter.OrderDetails memory buyer = _makeBuyerOrder(BUYER_ORDER_ID, bob, 95 ether, 90 ether, expiresAt);
+
+        _commitOrder(alice, address(tokenA), 100 ether, seller);
+        _commitOrder(bob, address(tokenB), 95 ether, buyer);
+
+        // Proof timestamp in the future
+        uint256 proofTs = block.timestamp + 60;
+        vm.prank(engine);
+        vm.expectRevert("Timestamp in future");
+        router.proveAndSettle(SELLER_ORDER_ID, BUYER_ORDER_ID, 100 ether, 95 ether, proofTs, dummyA, dummyB, dummyC);
+    }
+
     function test_RevertProveAndSettle_ZeroFill() public {
         uint256 expiresAt = block.timestamp + 1 hours;
         DarkPoolRouter.OrderDetails memory seller = _makeSellerOrder(100 ether, 90 ether, expiresAt);
@@ -687,6 +750,6 @@ contract DarkPoolRouterTest is Test {
 
         vm.prank(engine);
         vm.expectRevert("Zero seller fill");
-        router.proveAndSettle(SELLER_ORDER_ID, BUYER_ORDER_ID, 0, 95 ether, dummyA, dummyB, dummyC);
+        router.proveAndSettle(SELLER_ORDER_ID, BUYER_ORDER_ID, 0, 95 ether, block.timestamp, dummyA, dummyB, dummyC);
     }
 }

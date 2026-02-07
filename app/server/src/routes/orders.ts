@@ -81,6 +81,7 @@ router.post('/', async (req: Request, res: Response) => {
     const verificationError = await verifyCommitment(
       order_id,
       user_address,
+      order_type,
       base_token,
       quote_token,
       sell_amount,

@@ -38,6 +38,11 @@ contract DarkPoolRouter {
     /// @notice Native ETH sentinel (matches frontend convention, avoids address(0) in calldata)
     address public constant NATIVE_ETH = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
 
+    /// @notice Maximum age of a ZK proof timestamp (5 minutes).
+    /// The proof is generated off-chain with a snapshot timestamp and verified on-chain
+    /// against block.timestamp. This bounds how stale a proof can be.
+    uint256 public constant MAX_PROOF_AGE = 300;
+
     // ============ STATE ============
 
     IYellowCustody public immutable custody;
@@ -252,16 +257,23 @@ contract DarkPoolRouter {
     ///      The contract reads commitment hashes + settledAmounts from storage and passes
     ///      them as public inputs. This prevents replay (settledAmount changes after each call,
     ///      making old proofs invalid).
+    ///      proofTimestamp is the timestamp snapshot used during off-chain proof generation.
+    ///      It must be recent (within MAX_PROOF_AGE of block.timestamp) and not in the future.
     function proveAndSettle(
         bytes32 sellerOrderId,
         bytes32 buyerOrderId,
         uint256 sellerFillAmount,
         uint256 buyerFillAmount,
+        uint256 proofTimestamp,
         uint256[2] calldata a,
         uint256[2][2] calldata b,
         uint256[2] calldata c
     ) external {
         require(msg.sender == engine, "Only engine");
+
+        // Bound the proof timestamp: must be recent and not in the future
+        require(proofTimestamp <= block.timestamp, "Timestamp in future");
+        require(block.timestamp - proofTimestamp <= MAX_PROOF_AGE, "Proof too old");
 
         Commitment storage sellerC = commitments[sellerOrderId];
         Commitment storage buyerC = commitments[buyerOrderId];
@@ -271,7 +283,9 @@ contract DarkPoolRouter {
         require(sellerFillAmount > 0, "Zero seller fill");
         require(buyerFillAmount > 0, "Zero buyer fill");
 
-        // Build public inputs array — must match circuit's public signal order exactly
+        // Build public inputs array — must match circuit's public signal order exactly.
+        // Uses proofTimestamp (the snapshot from proof generation) instead of block.timestamp
+        // so the proof's public signals match what the verifier checks.
         uint256[7] memory pubInputs = [
             uint256(sellerC.orderHash), // [0] sellerCommitmentHash
             uint256(buyerC.orderHash), // [1] buyerCommitmentHash
@@ -279,7 +293,7 @@ contract DarkPoolRouter {
             buyerFillAmount, // [3] buyerFillAmount
             sellerC.settledAmount, // [4] sellerSettledSoFar
             buyerC.settledAmount, // [5] buyerSettledSoFar
-            block.timestamp // [6] currentTimestamp
+            proofTimestamp // [6] currentTimestamp
         ];
 
         require(zkVerifier.verifyProof(a, b, c, pubInputs), "Invalid proof");

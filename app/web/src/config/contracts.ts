@@ -38,7 +38,7 @@ export const ROUTER_ABI = [
   {
     name: 'depositAndCommit',
     type: 'function',
-    stateMutability: 'nonpayable',
+    stateMutability: 'payable',
     inputs: [
       { name: 'token', type: 'address' },
       { name: 'depositAmount', type: 'uint256' },

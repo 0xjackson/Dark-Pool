@@ -42,14 +42,22 @@ function getContract(): ethers.Contract {
 export async function verifyCommitment(
   orderId: string,
   user: string,
-  sellToken: string,
-  buyToken: string,
+  orderType: string,
+  baseToken: string,
+  quoteToken: string,
   sellAmount: string,
   minBuyAmount: string,
   expiresAt: number
 ): Promise<string | null> {
   try {
     const contract = getContract();
+
+    // Derive contract-level tokens from trading pair + order type
+    // SELL: sellToken = baseToken, buyToken = quoteToken
+    // BUY: sellToken = quoteToken, buyToken = baseToken
+    const isBuy = orderType === 'BUY';
+    const sellToken = isBuy ? quoteToken : baseToken;
+    const buyToken = isBuy ? baseToken : quoteToken;
 
     // Retry a few times — public RPC nodes may lag behind the frontend's provider
     let commitment;

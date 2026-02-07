@@ -16,7 +16,7 @@ const BATCH_SIZE = 10;
 const ROUTER_ADDRESS = process.env.ROUTER_ADDRESS as Address | undefined;
 
 const ROUTER_ABI = [
-  'function proveAndSettle(bytes32 sellerOrderId, bytes32 buyerOrderId, uint256 sellerFillAmount, uint256 buyerFillAmount, uint256[2] calldata a, uint256[2][2] calldata b, uint256[2] calldata c) external',
+  'function proveAndSettle(bytes32 sellerOrderId, bytes32 buyerOrderId, uint256 sellerFillAmount, uint256 buyerFillAmount, uint256 proofTimestamp, uint256[2] calldata a, uint256[2][2] calldata b, uint256[2] calldata c) external',
   'function markFullySettled(bytes32 orderId) external',
   'function commitments(bytes32) view returns (address user, bytes32 orderHash, uint256 timestamp, uint256 settledAmount, uint8 status)',
 ] as const;
@@ -111,6 +111,14 @@ async function settleMatch(match: any): Promise<void> {
   const sellerOrder = await loadOrderDetails(match.sell_order_id);
   const buyerOrder = await loadOrderDetails(match.buy_order_id);
 
+  // Derive contract-level sell/buy tokens from trading pair + order type
+  // SELL order: sellToken = base_token, buyToken = quote_token
+  // BUY order: sellToken = quote_token, buyToken = base_token
+  const sellerSellToken = sellerOrder.order_type === 'BUY' ? sellerOrder.quote_token : sellerOrder.base_token;
+  const sellerBuyToken = sellerOrder.order_type === 'BUY' ? sellerOrder.base_token : sellerOrder.quote_token;
+  const buyerSellToken = buyerOrder.order_type === 'BUY' ? buyerOrder.quote_token : buyerOrder.base_token;
+  const buyerBuyToken = buyerOrder.order_type === 'BUY' ? buyerOrder.base_token : buyerOrder.quote_token;
+
   // STEP 4: Read on-chain settledAmount for both orders (needed as ZK public inputs)
   let sellerSettledSoFar = '0';
   let buyerSettledSoFar = '0';
@@ -136,13 +144,16 @@ async function settleMatch(match: any): Promise<void> {
   }
 
   // STEP 5: Generate ZK proof
+  // Capture the timestamp now — this same value is passed as a public input to the circuit
+  // AND to the contract's proveAndSettle(proofTimestamp), so they match exactly.
+  const proofTimestamp = Math.floor(Date.now() / 1000);
   console.log(`Match ${match.id}: generating ZK proof...`);
   const proof = await generateSettlementProof(
     {
       orderId: sellerOrder.order_id,
       user: sellerOrder.user_address,
-      sellToken: sellerOrder.base_token,
-      buyToken: sellerOrder.quote_token,
+      sellToken: sellerSellToken,
+      buyToken: sellerBuyToken,
       sellAmount: sellerOrder.sell_amount,
       minBuyAmount: sellerOrder.min_buy_amount,
       expiresAt: Math.floor(new Date(sellerOrder.expires_at).getTime() / 1000),
@@ -150,8 +161,8 @@ async function settleMatch(match: any): Promise<void> {
     {
       orderId: buyerOrder.order_id,
       user: buyerOrder.user_address,
-      sellToken: buyerOrder.base_token,
-      buyToken: buyerOrder.quote_token,
+      sellToken: buyerSellToken,
+      buyToken: buyerBuyToken,
       sellAmount: buyerOrder.sell_amount,
       minBuyAmount: buyerOrder.min_buy_amount,
       expiresAt: Math.floor(new Date(buyerOrder.expires_at).getTime() / 1000),
@@ -162,7 +173,7 @@ async function settleMatch(match: any): Promise<void> {
     quoteAmount,         // buyerFillAmount
     sellerSettledSoFar,
     buyerSettledSoFar,
-    Math.floor(Date.now() / 1000),
+    proofTimestamp,
   );
   console.log(`Match ${match.id}: ZK proof generated`);
 
@@ -180,6 +191,7 @@ async function settleMatch(match: any): Promise<void> {
         buyerOrder.order_id as Hex,
         BigInt(match.quantity),
         BigInt(quoteAmount),
+        BigInt(proofTimestamp),
         proof.a.map(BigInt) as [bigint, bigint],
         proof.b.map((row: string[]) => row.map(BigInt)) as [[bigint, bigint], [bigint, bigint]],
         proof.c.map(BigInt) as [bigint, bigint],
@@ -282,7 +294,7 @@ async function settleMatch(match: any): Promise<void> {
 
 async function loadOrderDetails(orderId: string) {
   const result = await db.query(
-    `SELECT id, user_address, base_token, quote_token,
+    `SELECT id, user_address, order_type, base_token, quote_token,
             order_id, sell_amount, min_buy_amount, commitment_hash,
             quantity, price, expires_at
      FROM orders WHERE id = $1`,
