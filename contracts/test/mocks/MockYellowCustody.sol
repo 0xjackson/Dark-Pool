@@ -7,8 +7,8 @@ import "../../src/interfaces/IYellowCustody.sol";
 contract MockYellowCustody is IYellowCustody {
     mapping(address => mapping(address => uint256)) public deposits;
 
-    function deposit(address token, uint256 amount) external {
+    function deposit(address account, address token, uint256 amount) external payable {
         IERC20(token).transferFrom(msg.sender, address(this), amount);
-        deposits[msg.sender][token] += amount;
+        deposits[account][token] += amount;
     }
 }

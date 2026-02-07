@@ -78,9 +78,9 @@ contract DarkPoolRouter {
         // Pull tokens from user
         IERC20(token).safeTransferFrom(msg.sender, address(this), depositAmount);
 
-        // Deposit to Yellow Custody
+        // Deposit to Yellow Custody — credits USER's unified balance (not Router's)
         IERC20(token).approve(address(custody), depositAmount);
-        custody.deposit(token, depositAmount);
+        custody.deposit(msg.sender, token, depositAmount);
 
         // Store commitment
         commitments[orderId] =

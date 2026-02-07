@@ -1,0 +1,1283 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;0,800;0,900;1,400;1,500;1,600;1,700;1,800;1,900&display=swap');
+@import url('https://fonts.cdnfonts.com/css/metro-sans');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * Any CSS included here will be global. The classic template
+ * bundles Infima by default. Infima is a CSS framework designed to
+ * work well for content-centric websites.
+ */
+
+/* You can override the default Infima variables here. */
+:root {
+  --ifm-color-primary: #1847CC;
+  --ifm-color-primary-dark: #1640B8;
+  --ifm-color-primary-darker: #143DB0;
+  --ifm-color-primary-darkest: #113399;
+  --ifm-color-primary-light: #1F4FDE;
+  --ifm-color-primary-lighter: #2052E6;
+  --ifm-color-primary-lightest: #335CFF;
+  --ifm-code-font-size: 95%;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+  --ifm-font-family-base: 'Poppins', sans-serif;
+  --ifm-font-weight-base: 300;
+  --ifm-font-weight-semibold: 500;
+  --ifm-font-weight-bold: 500;
+  --doc-sidebar-width: 315px;
+  --ifm-navbar-search-input-icon: url('data:image/svg+xml;utf8,<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14.3871 14.3851L18.4748 18.4728M14.3871 14.3851C11.4453 17.327 6.67557 17.327 3.73377 14.3851C0.791869 11.4433 0.791869 6.67362 3.73377 3.73182C6.67557 0.789916 11.4453 0.789916 14.3871 3.73182C17.329 6.67362 17.329 11.4433 14.3871 14.3851Z" stroke="%238E8E8E" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+}
+
+/* Global font styling enforcement */
+* {
+  font-family: 'Poppins', sans-serif !important;
+  font-style: medium !important;
+}
+
+*:not(h1):not(h2):not(h3):not(h4):not(h5):not(h6):not(b):not(strong) {
+  font-weight: 300 !important;
+}
+
+/* For readability concerns, you should choose a lighter palette in dark mode. */
+[data-theme='dark'] {
+  --ifm-color-primary: #FDE058;
+  --ifm-color-primary-dark: #FDD73A;
+  --ifm-color-primary-darker: #FDD12C;
+  --ifm-color-primary-darkest: #FCC500;
+  --ifm-color-primary-light: #FEE976;
+  --ifm-color-primary-lighter: #FEEF84;
+  --ifm-color-primary-lightest: #FEF5B0;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+  /* Dark theme search icon */
+  --ifm-navbar-search-input-icon: url('data:image/svg+xml;utf8,<svg width="16" height="16" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M14.3871 14.3851L18.4748 18.4728M14.3871 14.3851C11.4453 17.327 6.67557 17.327 3.73377 14.3851C0.791869 11.4433 0.791869 6.67362 3.73377 3.73182C6.67557 0.789916 11.4453 0.789916 14.3871 3.73182C17.329 6.67362 17.329 11.4433 14.3871 14.3851Z" stroke="%23BBBBBB" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+}
+
+/* Custom Sidebar Styling */
+.theme-doc-sidebar-item-link {
+  padding: 6px 16px;
+  display: block;
+  transition: none;
+  margin-bottom: 2px;
+}
+
+/* Sidebar text styling */
+.menu__link:not(.menu__link--active),
+.theme-doc-sidebar-item-link:not(.theme-doc-sidebar-item-link--active),
+.theme-doc-sidebar-item-category .menu__link:not(.menu__link--active) {
+  font-family: 'Poppins', sans-serif !important;
+  font-weight: 300 !important;
+  font-style: normal !important;
+  font-size: 16px !important;
+  line-height: 24px !important;
+  letter-spacing: 0.15px !important;
+  vertical-align: middle !important;
+}
+
+/* Active items styling */
+.menu__link--active,
+.theme-doc-sidebar-item-link--active,
+.theme-doc-sidebar-item-category .menu__link--active {
+  font-family: 'Poppins', sans-serif !important;
+  font-weight: 500 !important;
+  font-style: normal !important;
+  font-size: 16px !important;
+  line-height: 24px !important;
+  letter-spacing: 0.15px !important;
+  vertical-align: middle !important;
+}
+
+/* Override font weight specifically for active items */
+.menu__link--active,
+.theme-doc-sidebar-item-link--active,
+a.menu__link--active {
+  font-weight: 500 !important;
+}
+
+/* Remove ALL hover background effects and add text darkening */
+.theme-doc-sidebar-item-link:hover,
+.menu__link:hover,
+.menu__caret:hover {
+  background: transparent !important;
+  background-color: transparent !important;
+  text-decoration: none;
+  color: #333333 !important;
+}
+
+/* Remove hover effects for menu items and add text darkening */
+.menu__list-item:hover,
+.menu__list-item:hover>.menu__link {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+.menu__list-item:hover>.menu__link {
+  color: #333333 !important;
+}
+
+/* Dark mode hover text */
+[data-theme='dark'] .theme-doc-sidebar-item-link:hover,
+[data-theme='dark'] .menu__link:hover,
+[data-theme='dark'] .menu__list-item:hover>.menu__link {
+  color: #cccccc !important;
+}
+
+/* Active/current item styling - black instead of green */
+.theme-doc-sidebar-item-link--active,
+.menu__link--active {
+  color: #000000 !important;
+  font-weight: 500 !important;
+  background: transparent !important;
+  position: relative;
+}
+
+/* Default left border for sidebar document links only (not category headers) */
+.menu__link:not(.menu__link--sublist):not(.menu__link--sublist-caret)::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: -8px;
+  bottom: -8px;
+  width: 2px;
+  background-color: #EDEDED;
+}
+
+/* Level 3 items border positioning */
+.menu__list .menu__list .menu__list .menu__link:not(.menu__link--sublist):not(.menu__link--sublist-caret)::before {
+  left: 8px;
+}
+
+/* Add proper padding for all sidebar items with borders */
+.menu__link:not(.menu__link--sublist):not(.menu__link--sublist-caret) {
+  position: relative;
+}
+
+/* Add extra spacing only for sub-items (level-2 items under categories) */
+.theme-doc-sidebar-item-link-level-2 .menu__link {
+  padding-left: 32px !important;
+}
+
+.menu__list .menu__list .menu__link {
+  padding-left: 24px !important;
+}
+
+.menu__list .menu__list .menu__list .menu__link {
+  padding-left: 32px !important;
+}
+
+/* Table of contents styling - use darker/lighter colors instead of theme colors */
+.tableOfContents_bqdL .table-of-contents__link--active,
+.tableOfContents_bqdL .table-of-contents__link--active code,
+.theme-doc-toc-desktop .table-of-contents__link--active,
+.theme-doc-toc-desktop .table-of-contents__link--active code,
+a.table-of-contents__link.table-of-contents__link--active,
+a.table-of-contents__link.table-of-contents__link--active code {
+  color: #000000 !important;
+  font-weight: 400 !important;
+  border-left-color: transparent !important;
+  background: transparent !important;
+}
+
+[data-theme='dark'] .tableOfContents_bqdL .table-of-contents__link--active,
+[data-theme='dark'] .tableOfContents_bqdL .table-of-contents__link--active code,
+[data-theme='dark'] .theme-doc-toc-desktop .table-of-contents__link--active,
+[data-theme='dark'] .theme-doc-toc-desktop .table-of-contents__link--active code,
+[data-theme='dark'] a.table-of-contents__link.table-of-contents__link--active,
+[data-theme='dark'] a.table-of-contents__link.table-of-contents__link--active code {
+  color: #ffffff !important;
+}
+
+.table-of-contents__link {
+  color: #666666 !important;
+  font-weight: 300 !important;
+}
+
+[data-theme='dark'] .table-of-contents__link {
+  color: #a0a0a0 !important;
+}
+
+/* Override hover colors separately */
+.table-of-contents__link:hover,
+.table-of-contents__link:hover code {
+  color: #333333 !important;
+}
+
+[data-theme='dark'] .table-of-contents__link:hover,
+[data-theme='dark'] .table-of-contents__link:hover code {
+  color: #cccccc !important;
+}
+
+/* Pagination navigation styling */
+.pagination-nav__link {
+  border: 1px solid #e0e0e0 !important;
+  background: transparent !important;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1) !important;
+}
+
+.pagination-nav__link:hover {
+  border-color: #FDDA16 !important;
+  background: transparent !important;
+  text-decoration: none !important;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15) !important;
+}
+
+.pagination-nav__sublabel {
+  color: #666666 !important;
+  font-weight: 300 !important;
+}
+
+.pagination-nav__label {
+  color: #000000 !important;
+  font-weight: 400 !important;
+}
+
+/* Dark mode pagination */
+[data-theme='dark'] .pagination-nav__link {
+  border-color: #404040 !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+}
+
+[data-theme='dark'] .pagination-nav__link:hover {
+  border-color: #FDDA16 !important;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4) !important;
+}
+
+[data-theme='dark'] .pagination-nav__sublabel {
+  color: #a0a0a0 !important;
+}
+
+[data-theme='dark'] .pagination-nav__label {
+  color: #ffffff !important;
+}
+
+/* Active left border color override */
+.menu__link--active:not(.menu__link--sublist):not(.menu__link--sublist-caret)::before {
+  background-color: #FDDA16;
+}
+
+[data-theme='dark'] .theme-doc-sidebar-item-link--active,
+[data-theme='dark'] .menu__link--active {
+  color: #ffffff !important;
+}
+
+/* Dark theme default border */
+[data-theme='dark'] .menu__link:not(.menu__link--sublist):not(.menu__link--sublist-caret)::before {
+  background-color: #404040;
+}
+
+[data-theme='dark'] .menu__link--active:not(.menu__link--sublist):not(.menu__link--sublist-caret)::before {
+  background-color: #FDDA16;
+}
+
+/* Override Docusaurus default active colors */
+.menu__link--active:not(.menu__link--sublist) {
+  background-color: transparent !important;
+}
+
+/* Category items spacing */
+.theme-doc-sidebar-item-category {
+  margin-bottom: 8px;
+}
+
+.theme-doc-sidebar-item-category>.theme-doc-sidebar-item-link {
+  font-weight: 600;
+  padding: 8px 0;
+}
+
+/* Reduce spacing between all sidebar items */
+.theme-doc-sidebar-item {
+  margin-bottom: 2px;
+}
+
+/* Remove category collapse/expand hover effects and add text darkening */
+.theme-doc-sidebar-item-category .theme-doc-sidebar-item-link:hover,
+.theme-doc-sidebar-item-category .menu__link:hover,
+.theme-doc-sidebar-item-category:hover,
+.menu__list-item--collapsed:hover,
+.menu__list-item--collapsible:hover,
+.menu__list-item--collapsed:hover>.menu__link,
+.menu__list-item--collapsible:hover>.menu__link {
+  background: transparent !important;
+  background-color: transparent !important;
+  color: #333333 !important;
+}
+
+/* Dark mode category hover */
+[data-theme='dark'] .theme-doc-sidebar-item-category .theme-doc-sidebar-item-link:hover,
+[data-theme='dark'] .theme-doc-sidebar-item-category .menu__link:hover,
+[data-theme='dark'] .menu__list-item--collapsed:hover>.menu__link,
+[data-theme='dark'] .menu__list-item--collapsible:hover>.menu__link {
+  color: #cccccc !important;
+}
+
+/* Force remove background on all menu states */
+.menu__list .menu__list-item:hover,
+.menu__list .menu__list-item:hover .menu__link,
+.menu__list .menu__list-item--active:hover,
+.menu__list .menu__list-item--active:hover .menu__link,
+.menu__list-item.theme-doc-sidebar-item-category:hover,
+.menu__list-item.theme-doc-sidebar-item-category:hover .menu__link {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* Specifically target expanded/selected category states */
+.menu__list-item--collapsible.theme-doc-sidebar-item-category:hover,
+.menu__list-item--collapsed.theme-doc-sidebar-item-category:hover,
+.menu__list-item.theme-doc-sidebar-item-category--active:hover,
+.menu__list-item.theme-doc-sidebar-item-category .menu__link:hover {
+  background: transparent !important;
+  background-color: transparent !important;
+  color: #333333 !important;
+}
+
+[data-theme='dark'] .menu__list-item.theme-doc-sidebar-item-category .menu__link:hover {
+  color: #cccccc !important;
+}
+
+
+
+
+/* Remove black border and styling for parent categories (categories with subcategories) */
+.menu__link--sublist.menu__link--active,
+a.menu__link.menu__link--sublist.menu__link--active {
+  border-left: none !important;
+  padding-left: 16px !important;
+  font-weight: 600;
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* Remove hover effects specifically for parent categories */
+.menu__link--sublist:hover,
+.menu__link--sublist.menu__link--active:hover,
+a.menu__link.menu__link--sublist:hover,
+a.menu__link.menu__link--sublist.menu__link--active:hover {
+  background: transparent !important;
+  background-color: transparent !important;
+  color: #333333 !important;
+}
+
+[data-theme='dark'] .menu__link--sublist:hover,
+[data-theme='dark'] .menu__link--sublist.menu__link--active:hover,
+[data-theme='dark'] a.menu__link.menu__link--sublist:hover,
+[data-theme='dark'] a.menu__link.menu__link--sublist.menu__link--active:hover {
+  color: #cccccc !important;
+}
+
+/* Move expand/collapse icon to the left side of text */
+.menu__link--sublist,
+.menu__list-item-collapsible>.menu__link {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  padding-left: 16px !important;
+}
+
+/* Move the caret to the beginning (left side) */
+.menu__link--sublist .menu__caret {
+  order: -1 !important;
+  margin-right: 8px !important;
+  margin-left: 0 !important;
+  position: relative !important;
+  right: auto !important;
+  left: auto !important;
+  top: auto !important;
+  transform: none !important;
+}
+
+/* Add arrow icon before sidebar items with subitems */
+.menu__link--sublist::before,
+.menu__list-item-collapsible>.menu__link::before {
+  content: '>' !important;
+  margin-right: 8px !important;
+  font-size: 24px !important;
+  color: #666666 !important;
+  transition: transform 0.2s ease !important;
+  display: inline-block !important;
+  width: 24px !important;
+  text-align: center !important;
+  background: none !important;
+  background-color: transparent !important;
+  position: relative !important;
+  z-index: 1 !important;
+  vertical-align: middle !important;
+  line-height: 24px !important;
+  top: -2px !important;
+}
+
+/* Rotate arrow when expanded */
+.menu__link--sublist[aria-expanded="true"]::before,
+.menu__list-item-collapsible:not(.menu__list-item--collapsed)>.menu__link::before {
+  transform: rotate(90deg) !important;
+}
+
+/* Dark mode arrow color */
+[data-theme='dark'] .menu__link--sublist::before,
+[data-theme='dark'] .menu__list-item-collapsible>.menu__link::before {
+  color: #a0a0a0 !important;
+}
+
+
+/* Category title when expanded */
+.theme-doc-sidebar-item-category-level-1>.theme-doc-sidebar-item-link {
+  padding: 10px 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+/* Footer styling */
+.footer {
+  background-color: #FFFFFF !important;
+  color: #000000;
+  border-top: 1px solid #EBEDF0;
+  padding-top: 3rem !important;
+  padding-bottom: 3rem !important;
+}
+
+[data-theme='dark'] .footer {
+  background-color: #262626 !important;
+  color: #ffffff;
+  border-top: 1px solid #2e2e32;
+}
+
+.footer__title {
+  color: #000000;
+  font-family: 'Poppins', sans-serif !important;
+  font-weight: 500 !important;
+  font-style: normal !important;
+  font-size: 16px !important;
+  line-height: 24px !important;
+  letter-spacing: 0.15px !important;
+  vertical-align: middle !important;
+}
+
+[data-theme='dark'] .footer__title {
+  color: #ffffff;
+}
+
+.footer__item {
+  color: #000000;
+}
+
+[data-theme='dark'] .footer__item {
+  color: #ffffff;
+}
+
+.footer__link-item {
+  color: #000000;
+  font-family: 'Poppins', sans-serif !important;
+  font-weight: 400 !important;
+  font-style: normal !important;
+  font-size: 16px !important;
+  line-height: 24px !important;
+  letter-spacing: 0.15px !important;
+  vertical-align: middle !important;
+}
+
+[data-theme='dark'] .footer__link-item {
+  color: #ffffff;
+}
+
+.footer__copyright {
+  color: #000000;
+}
+
+[data-theme='dark'] .footer__copyright {
+  color: #ffffff !important;
+}
+
+/* Footer 4-column layout */
+.footer__links {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* Align footer logo with content */
+.footer .container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding-left: var(--ifm-spacing-horizontal) !important;
+  padding-right: var(--ifm-spacing-horizontal) !important;
+}
+
+.footer__links {
+  padding-left: 0 !important;
+}
+
+.footer__col:first-child,
+.footer__col:first-child .footer__items,
+.footer__col:first-child .footer__item {
+  padding-left: 0 !important;
+  margin-left: 0 !important;
+  text-align: left !important;
+}
+
+/* Thin line above header */
+.heroBanner::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background-color: #EBEDF0;
+  z-index: 1;
+}
+
+/* Copyright styling */
+.footer__copyright {
+  font-family: 'Poppins', sans-serif !important;
+  font-weight: 300 !important;
+  font-style: normal !important;
+  font-size: 14px !important;
+  line-height: 22px !important;
+  letter-spacing: 0% !important;
+  text-align: center !important;
+  vertical-align: middle !important;
+  margin-top: 4rem !important;
+  color: #000000 !important;
+}
+
+/* Navbar logo margin */
+.navbar__brand {
+  margin-left: 1rem !important;
+}
+
+@media screen and (max-width: 996px) {
+  .footer__links {
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+  }
+}
+
+@media screen and (max-width: 600px) {
+  .footer__links {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+}
+
+/* Navbar font styling */
+.navbar {
+  font-family: 'Poppins', sans-serif !important;
+}
+
+.navbar__brand,
+.navbar__item,
+.navbar__link,
+.menu__link {
+  font-family: 'Poppins', sans-serif !important;
+  font-weight: 400 !important;
+  font-style: medium !important;
+}
+
+/* Header title font styling */
+.hero__title {
+  font-family: 'Poppins', sans-serif !important;
+  font-weight: 500 !important;
+  font-style: medium !important;
+  font-size: 48px !important;
+  line-height: 56px !important;
+  letter-spacing: -0.6px !important;
+  vertical-align: middle !important;
+}
+
+/* Ensure SDK span inherits the same font weight */
+.hero__title span {
+  font-weight: 500 !important;
+  font-style: medium !important;
+}
+
+/* Header description styling */
+.hero__subtitle {
+  font-family: 'Poppins', sans-serif !important;
+  font-weight: 300 !important;
+  font-style: normal !important;
+  font-size: 18px !important;
+  line-height: 26px !important;
+  letter-spacing: 0px !important;
+  vertical-align: middle !important;
+}
+
+.hero {
+  background-color: #222222 !important;
+}
+
+[data-theme='dark'] .hero {
+  background-color: #090909 !important;
+}
+
+[data-theme='dark'] .hero__subtitle {
+  color: #FFFFFF !important;
+}
+
+.search-bar-container,
+.search-bar-container input,
+.navbar__search input,
+input[type="search"],
+.navbar input[placeholder*="Search"],
+[class*="searchBox"] input {
+  border-radius: 4px !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  background-color: var(--ifm-navbar-background-color, #ffffff) !important;
+  border: 1px solid #e0e0e0 !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.07) !important;
+}
+
+[data-theme='dark'] .search-bar-container,
+[data-theme='dark'] .search-bar-container input,
+[data-theme='dark'] .navbar__search input,
+[data-theme='dark'] input[type="search"],
+[data-theme='dark'] .navbar input[placeholder*="Search"],
+[data-theme='dark'] [class*="searchBox"] input {
+  background-color: var(--ifm-navbar-background-color, #242526) !important;
+  border: 1px solid #404040 !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.14) !important;
+}
+
+/* Search input placeholder styling */
+.navbar__search input::placeholder,
+.search-bar::placeholder,
+input[type="search"]::placeholder,
+.navbar input[placeholder*="Search"]::placeholder,
+[class*="searchBox"] input::placeholder {
+  color: #747272 !important;
+  font-weight: 400 !important;
+  font-style: normal !important;
+  font-size: 90% !important;
+}
+
+/* Dark theme search input placeholder styling */
+[data-theme='dark'] .navbar__search input::placeholder,
+[data-theme='dark'] .search-bar::placeholder,
+[data-theme='dark'] input[type="search"]::placeholder,
+[data-theme='dark'] .navbar input[placeholder*="Search"]::placeholder,
+[data-theme='dark'] [class*="searchBox"] input::placeholder {
+  color: #A1A1A1 !important;
+}
+
+.footer-logo-light {
+  display: block !important;
+}
+
+.footer-logo-dark {
+  display: none !important;
+}
+
+[data-theme='dark'] .footer-logo-light {
+  display: none !important;
+}
+
+[data-theme='dark'] .footer-logo-dark {
+  display: block !important;
+}
+
+.navbar__item .navbar__link:not(.header-github-link),
+.navbar__link:not(.header-github-link) {
+  color: #585858 !important;
+}
+
+.navbar__item .navbar__link:hover:not(.header-github-link),
+.navbar__link:hover:not(.header-github-link) {
+  color: #090909 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* Active navbar menu item styling */
+.navbar__item .navbar__link--active:not(.header-github-link),
+.navbar__link--active:not(.header-github-link) {
+  position: relative !important;
+}
+
+.navbar__item .navbar__link--active:not(.header-github-link)::after,
+.navbar__link--active:not(.header-github-link)::after {
+  content: '' !important;
+  position: absolute !important;
+  bottom: -1px !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  width: 80% !important;
+  height: 3px !important;
+  background-color: #FCD002 !important;
+}
+
+[data-theme='dark'] .navbar__item .navbar__link,
+[data-theme='dark'] .navbar__link {
+  color: #BBBBBB !important;
+}
+
+[data-theme='dark'] .navbar__item .navbar__link:hover,
+[data-theme='dark'] .navbar__link:hover {
+  color: #D2D2D2 !important;
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+.header-github-link:before {
+  content: '';
+  width: 24px;
+  height: 24px;
+  display: flex;
+  background: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath fill='%238E8E8E' d='M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12'/%3E%3C/svg%3E") no-repeat;
+}
+
+[data-theme='dark'] .header-github-link:before {
+  background: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath fill='%23BBBBBB' d='M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12'/%3E%3C/svg%3E") no-repeat;
+}
+
+.header-github-link:hover:before {
+  opacity: 0.8;
+}
+
+.navbar__item .navbar__link[class*="colorModeToggle"],
+.navbar__item button,
+.navbar__item .navbar__link.header-github-link,
+[class*="searchBox"] button,
+[class*="colorModeToggle"] {
+  width: 24px !important;
+  height: 24px !important;
+  padding: 0 !important;
+  margin: 0 8px !important;
+}
+
+[class*="toggleIcon"] {
+  color: #FFFFFF !important;
+}
+
+[data-theme='dark'] [class*="toggleIcon"] {
+  color: #FFFFFF !important;
+}
+
+
+.navbar svg[role="img"],
+.navbar path,
+[class*="search"] svg,
+[class*="search"] path,
+.navbar button svg,
+.navbar button path,
+input[type="search"]~svg,
+input[type="search"]~svg path,
+button[title*="Search"] svg,
+button[title*="Search"] path,
+.navbar__item svg,
+.navbar__item path,
+.search-icon,
+.search-icon::before,
+.search-icon::after {
+  color: #8E8E8E !important;
+  fill: #8E8E8E !important;
+  stroke: #8E8E8E !important;
+  width: 20px !important;
+  height: 20px !important;
+}
+
+[data-theme='dark'] .navbar svg[role="img"],
+[data-theme='dark'] .navbar path,
+[data-theme='dark'] [class*="search"] svg,
+[data-theme='dark'] [class*="search"] path,
+[data-theme='dark'] .navbar button svg,
+[data-theme='dark'] .navbar button path,
+[data-theme='dark'] input[type="search"]~svg,
+[data-theme='dark'] input[type="search"]~svg path,
+[data-theme='dark'] button[title*="Search"] svg,
+[data-theme='dark'] button[title*="Search"] path,
+[data-theme='dark'] .navbar__item svg,
+[data-theme='dark'] .navbar__item path,
+[data-theme='dark'] .search-icon,
+[data-theme='dark'] .search-icon::before,
+[data-theme='dark'] .search-icon::after {
+  color: #BBBBBB !important;
+  fill: #BBBBBB !important;
+  stroke: #BBBBBB !important;
+}
+
+[data-theme='dark'] [class*="featureSquare"] {
+  background-color: #6A410E !important;
+}
+
+[data-theme='dark'] [class*="featureSquare"]::after {
+  background-color: #FCD002 !important;
+}
+
+[data-theme='dark'] [class*="featureTitle"] {
+  color: #FFFFFF !important;
+}
+
+[data-theme='dark'] [class*="featureDescription"] {
+  color: #D2D2D2 !important;
+}
+
+[data-theme='dark'] .footer__link-item {
+  color: #828282 !important;
+}
+
+[data-theme='dark'] .footer__copyright {
+  color: #6D6D6D !important;
+}
+
+/* Admonition styling */
+.theme-admonition.theme-admonition-note {
+  background-color: #FFFFFF !important;
+  border-left: 3px solid #A6A6A6 !important;
+}
+
+.theme-admonition.theme-admonition-tip {
+  background-color: #E8FCF1 !important;
+  border-left: 3px solid #419E6A !important;
+}
+
+.theme-admonition.theme-admonition-info {
+  background-color: #DBE9FE !important;
+  border-left: 3px solid #60A5FA !important;
+}
+
+.theme-admonition.theme-admonition-caution {
+  background-color: #FFF5D5 !important;
+  border-left: 3px solid #EEB107 !important;
+}
+
+.theme-admonition.theme-admonition-danger {
+  background-color: #FEEDEE !important;
+  border-left: 3px solid #F56666 !important;
+}
+
+.theme-admonition.theme-admonition-warning {
+  background-color: #FFF5D5 !important;
+  border-left: 3px solid #EEB107 !important;
+}
+
+/* Dark mode admonitions */
+[data-theme='dark'] .theme-admonition.theme-admonition-note {
+  background-color: #2A2A2A !important;
+  border-left: 3px solid #A6A6A6 !important;
+}
+
+[data-theme='dark'] .theme-admonition.theme-admonition-tip {
+  background-color: #1A2E20 !important;
+  border-left: 3px solid #419E6A !important;
+}
+
+[data-theme='dark'] .theme-admonition.theme-admonition-info {
+  background-color: #182B6A !important;
+  border-left: 3px solid #1656E6 !important;
+}
+
+[data-theme='dark'] .theme-admonition.theme-admonition-caution {
+  background-color: #3A3318 !important;
+  border-left: 3px solid #EEB107 !important;
+}
+
+[data-theme='dark'] .theme-admonition.theme-admonition-danger {
+  background-color: #3A1F1F !important;
+  border-left: 3px solid #F56666 !important;
+}
+
+[data-theme='dark'] .theme-admonition.theme-admonition-warning {
+  background-color: #3A3318 !important;
+  border-left: 3px solid #EEB107 !important;
+}
+
+.breadcrumbs__item--active,
+.breadcrumbs__item--active .breadcrumbs__link {
+  background: none !important;
+  background-color: transparent !important;
+  border-radius: 0 !important;
+}
+
+[data-theme='dark'] .breadcrumbs__item--active,
+[data-theme='dark'] .breadcrumbs__item--active .breadcrumbs__link {
+  background: none !important;
+  background-color: transparent !important;
+  border-radius: 0 !important;
+}
+
+/* Document headings and titles font weight */
+.markdown h1,
+.markdown h2,
+.markdown h3,
+.markdown h4,
+.markdown h5,
+.markdown h6,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+.theme-doc-markdown h1,
+.theme-doc-markdown h2,
+.theme-doc-markdown h3,
+.theme-doc-markdown h4,
+.theme-doc-markdown h5,
+.theme-doc-markdown h6 {
+  font-style: medium !important;
+  font-weight: 500 !important;
+}
+
+/* Bold text styling */
+b,
+strong,
+.markdown b,
+.markdown strong,
+.theme-doc-markdown b,
+.theme-doc-markdown strong {
+  font-style: medium !important;
+  font-weight: 500 !important;
+}
+
+/* Normal text styling */
+body,
+p,
+div,
+span,
+.markdown p,
+.markdown div,
+.markdown span,
+.theme-doc-markdown p,
+.theme-doc-markdown div,
+.theme-doc-markdown span,
+.theme-doc-markdown {
+  font-style: medium !important;
+  font-weight: 300 !important;
+}
+
+/* Remove gray background on hover for all sidebar items */
+.theme-doc-sidebar-item-link:hover,
+.menu__link:hover,
+.theme-doc-sidebar-item:hover,
+.menu__list-item:hover,
+.menu__list-item-collapsible:hover,
+.menu__link--sublist:hover,
+.menu__link--sublist-caret:hover {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* Remove black left border from root sidebar items like Learn */
+.theme-doc-sidebar-item-link-level-1 .menu__link--active::before,
+.theme-doc-sidebar-item-link-level-1 .menu__link::before {
+  display: none !important;
+}
+
+.theme-doc-sidebar-item-link-level-1 .menu__link--active,
+.theme-doc-sidebar-item-link-level-1 .menu__link {
+  border-left: none !important;
+  padding-left: 0 !important;
+  margin-left: 0 !important;
+}
+
+/* Code blocks font styling */
+pre[class*="language-"] *,
+.prism-code *,
+[class*="codeBlock"] *,
+code {
+  font-family: 'Menlo', Monaco, 'Courier New', monospace !important;
+  font-style: normal !important;
+  font-weight: 400 !important;
+}
+
+/* Custom code block background colors */
+.codeBlockContent_QJqH pre[style*="background-color"],
+.theme-code-block .codeBlockContent pre[style*="background-color"],
+pre.prism-code[style*="background-color"],
+pre.codeBlock_bY9V[style*="background-color"],
+.theme-code-block pre[style],
+.codeBlockContent_QJqH pre[style] {
+  background: #FFFFFF !important;
+  background-color: #FFFFFF !important;
+}
+
+/* Dark theme code block background */
+[data-theme='dark'] .codeBlockContent_QJqH pre[style*="background-color"],
+[data-theme='dark'] .theme-code-block .codeBlockContent pre[style*="background-color"],
+[data-theme='dark'] pre.prism-code[style*="background-color"],
+[data-theme='dark'] pre.codeBlock_bY9V[style*="background-color"],
+[data-theme='dark'] .theme-code-block pre[style],
+[data-theme='dark'] .codeBlockContent_QJqH pre[style] {
+  background: #242424 !important;
+  background-color: #242424 !important;
+}
+
+/* Code block styling */
+.theme-code-block {
+  position: relative;
+  margin: 1rem 0;
+  border-radius: 8px;
+  overflow: visible;
+  border: 1px solid #e9ecef;
+}
+
+[data-theme='dark'] .theme-code-block {
+  border: 1px solid #404040;
+}
+
+/* Code block header */
+.theme-code-block .codeBlockTitle,
+.codeBlockTitle_OeMC {
+  background: #F8F8F8 !important;
+  background-color: #F8F8F8 !important;
+  color: #272727 !important;
+  border: none !important;
+  border-bottom: 1px solid #e9ecef !important;
+  border-radius: 8px 8px 0 0 !important;
+  font-family: 'Menlo', monospace !important;
+  font-size: 15.2px !important;
+  font-weight: 400 !important;
+  font-style: normal !important;
+  line-height: 22.8px !important;
+  letter-spacing: 0% !important;
+  vertical-align: middle !important;
+  padding: 8px 80px 8px 16px !important;
+  margin: 0 !important;
+}
+
+[data-theme='dark'] .theme-code-block .codeBlockTitle,
+[data-theme='dark'] .codeBlockTitle_OeMC {
+  background: #292929 !important;
+  background-color: #292929 !important;
+  color: #a8a8a8 !important;
+  border-bottom: 1px solid #404040 !important;
+  padding: 10px 80px 10px 16px !important;
+}
+
+/* Code block with title adjustments */
+.theme-code-block .codeBlockTitle+.codeBlockContent .prism-code {
+  border-radius: 0 0 8px 8px !important;
+  margin-top: 0 !important;
+}
+
+/* Line numbers styling */
+.codeLineNumber_Tfdd,
+.prism-code .token-line .linenumber {
+  width: 3em !important;
+  min-width: 3em !important;
+  color: #666 !important;
+  text-align: right !important;
+  user-select: none !important;
+  border-right: none !important;
+  margin-right: 1.5em !important;
+  padding-right: 1em !important;
+  font-size: 0.72em !important;
+  /* 20% smaller: 0.9em * 0.8 = 0.72em */
+  background: #FFFFFF !important;
+  background-color: #FFFFFF !important;
+}
+
+[data-theme='dark'] .codeLineNumber_Tfdd,
+[data-theme='dark'] .prism-code .token-line .linenumber {
+  color: #888 !important;
+  border-right: none !important;
+  background: #242424 !important;
+  background-color: #242424 !important;
+  font-size: 0.72em !important;
+}
+
+/* Move button group to header area - always visible */
+.theme-code-block .buttonGroup_M5ko,
+.theme-code-block:hover .buttonGroup_M5ko,
+.buttonGroup_M5ko {
+  position: absolute !important;
+  top: 12px !important;
+  right: 16px !important;
+  z-index: 10 !important;
+  background: none !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  display: flex !important;
+}
+
+/* Copy button positioning - inside header */
+.theme-code-block .clean-btn {
+  background: transparent !important;
+  border: 1px solid #d0d7de !important;
+  border-radius: 6px !important;
+  padding: 4px 8px !important;
+  font-size: 12px !important;
+  color: #656d76 !important;
+  cursor: pointer !important;
+  margin: 0 2px !important;
+}
+
+.theme-code-block .clean-btn:hover {
+  background: rgba(0, 0, 0, 0.1) !important;
+  color: #24292e !important;
+}
+
+[data-theme='dark'] .theme-code-block .clean-btn {
+  background: transparent !important;
+  border: 1px solid #666 !important;
+  color: #a8a8a8 !important;
+}
+
+[data-theme='dark'] .theme-code-block .clean-btn:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: #ffffff !important;
+}
+
+/* Removed legacy sidebar overrides to restore collapsible behavior */
+
+/* Mermaid diagrams - ensure white background in all modes */
+.docusaurus-mermaid-container {
+  background-color: #ffffff !important;
+  padding: 1rem;
+  border-radius: 0.5rem;
+}
+
+[data-theme='dark'] .docusaurus-mermaid-container {
+  background-color: #ffffff !important;
+}
+
+.docusaurus-mermaid-container svg {
+  background-color: #ffffff !important;
+}
+
+.git-diff-remove {
+  background-color: rgba(255, 0, 0, 0.125);
+  border-left: 3px solid rgba(255, 0, 0, 0.5);
+  display: block;
+  margin: 0 calc(-1 * var(--ifm-pre-padding));
+  padding: 0 var(--ifm-pre-padding);
+}
+
+.git-diff-add {
+  background-color: rgba(26, 255, 0, 0.125);
+  border-left: 3px solid rgba(26, 255, 0, 0.5);
+  display: block;
+  margin: 0 calc(-1 * var(--ifm-pre-padding));
+  padding: 0 var(--ifm-pre-padding);
+}
+
+[data-theme="dark"] .git-diff-remove {
+  background-color: rgba(255, 0, 0, 0.15);
+  border-left: 3px solid rgba(255, 0, 0, 0.6);
+}
+
+[data-theme="dark"] .git-diff-add {
+  background-color: rgba(26, 255, 0, 0.15);
+  border-left: 3px solid rgba(26, 255, 0, 0.6);
+}
+
+/* Version Switcher Styles */
+.navbar-version-dropdown {
+  margin-right: 0.5rem;
+}
+
+.navbar-version-dropdown>a.navbar__link {
+  display: flex !important;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px !important;
+  border-radius: 4px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+/* Light Mode */
+[data-theme='light'] .navbar-version-dropdown>a.navbar__link {
+  background-color: #FFF9E6 !important;
+  /* Light yellow/beige from screenshot */
+  color: #0d0d0d !important;
+}
+
+[data-theme='light'] .navbar-version-dropdown>a.navbar__link:hover {
+  background-color: #FDF2C8 !important;
+  color: #0d0d0d !important;
+}
+
+/* Dark Mode */
+[data-theme='dark'] .navbar-version-dropdown>a.navbar__link {
+  background-color: #383125 !important;
+  /* Dark brown from screenshot */
+  color: #E6E6E6 !important;
+}
+
+[data-theme='dark'] .navbar-version-dropdown>a.navbar__link:hover {
+  background-color: #4A4031 !important;
+  color: #E6E6E6 !important;
+}
+
+/* Chevron/Icon adjustment */
+.navbar-version-dropdown>a.navbar__link::after {
+  margin-left: 6px;
+  border-color: currentColor transparent transparent transparent;
+}
+
+/* Mobile Sidebar Tweaks */
+/* Hide duplicate items in the mobile menu list (they are now in the header) */
+.navbar-sidebar__items .header-github-link,
+.navbar-sidebar__items .menu__list-item:has(.navbar-version-dropdown),
+.navbar-sidebar__items .navbar-version-dropdown {
+  display: none !important;
+}
+
+/* Ensure header items have correct spacing */
+.navbar-sidebar__brand .header-github-link {
+  margin-right: 8px !important;
+}
+
+.navbar-sidebar__brand .navbar-version-dropdown {
+  margin-right: 4px !important;
+}
+
+/* Remove yellow highlight in mobile sidebar */
+.navbar-sidebar__brand .navbar-version-dropdown>a.navbar__link,
+.navbar-sidebar__brand .navbar-version-dropdown>a.navbar__link:hover {
+  background-color: transparent !important;
+}
+
+[data-theme='dark'] .navbar-sidebar__brand .navbar-version-dropdown>a.navbar__link:hover {
+  background-color: transparent !important;
+}
+
+/* Remove yellow underline from version switcher (desktop & mobile) */
+html body a.navbar-version-dropdown.navbar__link::after,
+html body .navbar-version-dropdown>a.navbar__link::after {
+  content: none !important;
+  background-color: transparent !important;
+  display: none !important;
+}
+
+.navbar-sidebar__brand .clean-btn.navbar-sidebar__close {
+  margin-left: 12px;
+}
+
+/* Redefine brand header to support multi-row layout */
+.navbar-sidebar__brand {
+  flex-direction: column !important;
+  height: auto !important;
+  padding: 0 !important;
+  /* Remove padding from container to let rows handle it */
+  align-items: flex-start !important;
+  box-shadow: none !important;
+  /* Remove default shadow */
+}
+
+/* Add shadow to the top row (Logo + Close) */
+.navbar-sidebar__brand-row-main {
+  padding: 16px 17px;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.1);
+  margin-bottom: 16px;
+  /* Space between line and tools */
+}
+
+.navbar-sidebar__tools-row {
+  padding: 0 17px 16px;
+}
+
+/* Force navbar items (like version dropdown) to be visible in mobile header */
+.navbar-sidebar__brand .navbar__item,
+.navbar-sidebar__tools-row .navbar__item {
+  display: flex !important;
+}
+
+.navbar-sidebar__tools-row .header-github-link {
+  margin-right: 12px;
+}

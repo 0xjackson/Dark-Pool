@@ -82,7 +82,7 @@ contract DarkPoolRouterTest is Test {
         (address user,,, DarkPoolRouter.Status status) = router.commitments(SELLER_ORDER_ID);
         assertEq(user, alice);
         assertEq(uint8(status), uint8(DarkPoolRouter.Status.Active));
-        assertEq(custody.deposits(address(router), address(tokenA)), 100 ether);
+        assertEq(custody.deposits(alice, address(tokenA)), 100 ether);
 
         // Reveal + settle
         vm.prank(engine);

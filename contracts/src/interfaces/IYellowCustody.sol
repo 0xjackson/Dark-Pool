@@ -2,5 +2,5 @@
 pragma solidity ^0.8.19;
 
 interface IYellowCustody {
-    function deposit(address token, uint256 amount) external;
+    function deposit(address account, address token, uint256 amount) external payable;
 }

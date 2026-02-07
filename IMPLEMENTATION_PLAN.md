@@ -4,7 +4,9 @@
 
 Dark Pool is a private, peer-to-peer trading protocol for large crypto trades. Users can submit encrypted orders that get matched privately, with settlement happening atomically through Yellow Network. The system provides MEV protection through commit-reveal privacy and slippage protection through on-chain constraints.
 
-**Key design decision:** No EIP-712 signatures. User authorization is proven entirely through the on-chain `depositAndCommit` transaction — `msg.sender` is baked into the commitment hash, making separate signatures redundant.
+**Key design decision:** No EIP-712 signatures for order authorization. User authorization is proven through the on-chain `depositAndCommit` transaction — `msg.sender` is baked into the commitment hash. The only EIP-712 signature is for Yellow Network session key authorization (once per 30-day session), which delegates limited settlement authority to the engine.
+
+> **Settlement architecture is fully defined in [SETTLEMENT_IMPLEMENTATION.md](./SETTLEMENT_IMPLEMENTATION.md)** — covers session keys, App Sessions, the Judge governance model, engine authentication, asset identifiers, balance querying, and the complete fund flow with code-level references. **All design questions are resolved.**
 
 ---
 
@@ -72,8 +74,9 @@ The user deposits tokens and commits the order hash in a single on-chain call. F
 
 | Scenario | Signatures |
 |----------|-----------|
-| First time (new token) | 2 — `approve` + `depositAndCommit` |
-| Returning user (has approval) | 1 — `depositAndCommit` |
+| First time ever (new token) | 3 — `approve` + EIP-712 session key auth + `depositAndCommit` |
+| First trade in session (has approval) | 2 — EIP-712 session key auth + `depositAndCommit` |
+| Subsequent trades (active session key) | 1 — `depositAndCommit` |
 | User with existing Yellow balance | 1 — `commitOnly` |
 
 ### How Authorization Works
@@ -277,23 +280,49 @@ contract DarkPoolRouter {
 
 ## Signature Summary
 
+### User Signatures
+
 | Action | Wallet Interactions |
 |--------|---------------------|
-| First deposit + order | 2 (approve + depositAndCommit) |
-| Subsequent orders (has approval) | 1 (depositAndCommit) |
+| First ever (new token, new session) | 3 (approve + EIP-712 session key auth + depositAndCommit) |
+| First trade in session | 2 (EIP-712 session key auth + depositAndCommit) |
+| Subsequent trades (active session key) | 1 (depositAndCommit) |
 | Order with existing Yellow balance | 1 (commitOnly) |
 | Cancel order | 1 (cancel tx) |
-| Withdraw | 1 (withdraw tx) |
+| Check balance | 0 (on-chain view function, no auth) |
+| Withdraw | 1 (custody.withdrawal tx) |
+
+### Engine Signatures (per settlement, automated)
+
+| Action | Key Used | Purpose |
+|--------|----------|---------|
+| `revealAndSettle` tx | Engine wallet | On-chain verification gate |
+| App Session create (seller sig) | Seller's stored session key | Fund-owner consent |
+| App Session create (buyer sig) | Buyer's stored session key | Fund-owner consent |
+| App Session close | Engine session key | Swap allocations (weight 100) |
+| `markFullySettled` tx | Engine wallet | On-chain finalization |
 
 ---
 
-## Open Questions
+## Resolved Questions
 
-### 1. App Session Signatures
-Yellow requires participants with non-zero allocations to sign session creation. Need to confirm if governance model `[weights: 0,0,100, quorum: 100]` allows engine-only signing.
+### 1. App Session Signatures — RESOLVED
+"Game with Judge" governance model: `weights: [0, 0, 100]`, `quorum: 100`, `challenge: 0`. Users' session keys sign creation (fund-owner consent for non-zero allocations). Engine signs close alone (weight 100 meets quorum). Engine collects both user signatures server-side using stored session key private keys. See [SETTLEMENT_IMPLEMENTATION.md](./SETTLEMENT_IMPLEMENTATION.md).
 
 ### 2. Multi-Chain Support
 Starting with single chain. Add multi-chain later.
 
-### 3. Yellow App Sessions Integration
-App Sessions (not State Channels) are required for P2P trading. Settlement integration is the next major piece.
+### 3. Yellow App Sessions Integration — RESOLVED
+Full settlement flow designed and all technical details confirmed with code-level references. See [SETTLEMENT_IMPLEMENTATION.md](./SETTLEMENT_IMPLEMENTATION.md).
+
+### 4. Engine Authentication — RESOLVED
+Engine authenticates as itself with Yellow (`application: "clearnode"`, empty allowances, 1yr expiry). Maintains one persistent WS connection. Messages signed by user session keys are sent over engine's connection — Yellow validates signatures, not sender identity. Confirmed in Clearnode source.
+
+### 5. Asset Identifiers — RESOLVED
+App Sessions use lowercase string symbols (`"usdc"`, `"weth"`), not token addresses. Engine queries `get_assets` at boot to build a token-address-to-symbol map.
+
+### 6. Balance Querying — RESOLVED
+`Custody.getAccountsBalances()` is a public on-chain view function. No JWT, no WS, no auth. Direct `eth_call`.
+
+### 7. Session Key Expiry — RESOLVED
+30 days, no enforced maximum. Explicit revocation via `revoke_session_key` when user logs out or all orders filled. JWT (24h) is separate and irrelevant for settlement.
