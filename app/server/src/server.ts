@@ -4,9 +4,10 @@ import { Pool } from 'pg';
 import dotenv from 'dotenv';
 import ordersRouter, { setDatabase } from './routes/orders';
 import sessionKeysRouter, { setSessionKeysDatabase } from './routes/sessionKeys';
+import channelsRouter from './routes/channels';
 import DarkPoolWebSocketServer from './websocket/server';
 import { getWarlockClient } from './services/warlockClient';
-import { initEngineConnection } from './services/yellowConnection';
+import { initEngineConnection, setChannelDb } from './services/yellowConnection';
 import { startSettlementWorker, stopSettlementWorker } from './services/settlementWorker';
 
 // Load environment variables
@@ -44,6 +45,7 @@ db.query('SELECT NOW()', (err: Error | null, res: any) => {
 // Set database for routes
 setDatabase(db);
 setSessionKeysDatabase(db);
+setChannelDb(db);
 
 // Middleware
 app.use(express.json());
@@ -88,6 +90,7 @@ app.get('/health', async (req, res) => {
 // API Routes
 app.use('/api/orders', ordersRouter);
 app.use('/api/session-key', sessionKeysRouter);
+app.use('/api/channel', channelsRouter);
 
 
 // Initialize WebSocket server

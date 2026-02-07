@@ -13,6 +13,10 @@ import {
   createCloseAppSessionMessage,
   createRevokeSessionKeyMessage,
   createPingMessageV2,
+  createCreateChannelMessage,
+  createResizeChannelMessage,
+  createGetChannelsMessageV2,
+  createGetLedgerBalancesMessage,
   parseAuthChallengeResponse,
   parseAnyRPCResponse,
   parseGetAssetsResponse,
@@ -494,6 +498,229 @@ export async function revokeSessionKey(sessionKeyAddress: Address): Promise<void
   if (parsed.method === RPCMethod.Error) {
     throw new Error(`Revoke failed: ${JSON.stringify(parsed.params)}`);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Channel management (used for Yellow deposit flow)
+// ---------------------------------------------------------------------------
+
+export interface ChannelInfo {
+  channelId: string;
+  channel: {
+    participants: string[];
+    adjudicator: string;
+    challenge: number;
+    nonce: number;
+  };
+  state: {
+    intent: number;
+    version: number;
+    stateData: string;
+    allocations: Array<{
+      destination: string;
+      token: string;
+      amount: string;
+    }>;
+  };
+  serverSignature: string;
+}
+
+export interface LedgerBalance {
+  asset: string;
+  amount: string;
+}
+
+export interface ChannelRecord {
+  channelId: string;
+  status: string;
+  token: string;
+  amount: string;
+  chainId: number;
+}
+
+/**
+ * Request channel creation from the clearnode.
+ * Returns channel params + broker signature for on-chain Custody.create().
+ * Message must go over the USER's authenticated WS.
+ */
+export async function requestCreateChannel(
+  userAddress: Address,
+  chainId: number,
+  token: string,
+): Promise<ChannelInfo> {
+  const addr = getAddress(userAddress);
+  const userWs = getUserWs(addr);
+  if (!userWs) throw new Error(`No active WS for user ${addr}. Re-authenticate session key.`);
+
+  // Load session key to sign the RPC message
+  const signer = await getUserSessionKeySigner(addr);
+
+  const msg = await createCreateChannelMessage(signer, {
+    chain_id: chainId,
+    token: token as `0x${string}`,
+  });
+
+  const raw = await sendAndWait(userWs, msg);
+  const parsed = parseAnyRPCResponse(raw);
+
+  if (parsed.method === RPCMethod.Error) {
+    throw new Error(`create_channel rejected: ${JSON.stringify(parsed.params)}`);
+  }
+
+  const data = parsed.params as any;
+  return {
+    channelId: data.channel_id,
+    channel: {
+      participants: data.channel?.participants || [],
+      adjudicator: data.channel?.adjudicator || '',
+      challenge: data.channel?.challenge || 3600,
+      nonce: data.channel?.nonce || 0,
+    },
+    state: {
+      intent: data.state?.intent || 1,
+      version: data.state?.version || 0,
+      stateData: data.state?.state_data || '0x',
+      allocations: (data.state?.allocations || []).map((a: any) => ({
+        destination: a.destination || a.participant,
+        token: a.token || a.token_address,
+        amount: String(a.amount || '0'),
+      })),
+    },
+    serverSignature: data.server_signature || '',
+  };
+}
+
+/**
+ * Request channel resize from the clearnode.
+ * Returns updated state + broker signature for on-chain Custody.resize().
+ */
+export async function requestResizeChannel(
+  userAddress: Address,
+  channelId: string,
+  resizeAmount: string,
+  allocateAmount: string,
+): Promise<ChannelInfo> {
+  const addr = getAddress(userAddress);
+  const userWs = getUserWs(addr);
+  if (!userWs) throw new Error(`No active WS for user ${addr}. Re-authenticate session key.`);
+
+  const signer = await getUserSessionKeySigner(addr);
+
+  const msg = await createResizeChannelMessage(signer, {
+    channel_id: channelId as `0x${string}`,
+    resize_amount: BigInt(resizeAmount),
+    allocate_amount: BigInt(allocateAmount),
+    funds_destination: addr,
+  });
+
+  const raw = await sendAndWait(userWs, msg);
+  const parsed = parseAnyRPCResponse(raw);
+
+  if (parsed.method === RPCMethod.Error) {
+    throw new Error(`resize_channel rejected: ${JSON.stringify(parsed.params)}`);
+  }
+
+  const data = parsed.params as any;
+  return {
+    channelId: data.channel_id,
+    channel: { participants: [], adjudicator: '', challenge: 0, nonce: 0 },
+    state: {
+      intent: data.state?.intent || 2,
+      version: data.state?.version || 0,
+      stateData: data.state?.state_data || '0x',
+      allocations: (data.state?.allocations || []).map((a: any) => ({
+        destination: a.destination || a.participant,
+        token: a.token || a.token_address,
+        amount: String(a.amount || '0'),
+      })),
+    },
+    serverSignature: data.server_signature || '',
+  };
+}
+
+/**
+ * Get unified (ledger) balances for a user from the clearnode.
+ */
+export async function getLedgerBalances(
+  userAddress: Address,
+): Promise<LedgerBalance[]> {
+  const addr = getAddress(userAddress);
+  const userWs = getUserWs(addr);
+  if (!userWs) throw new Error(`No active WS for user ${addr}. Re-authenticate session key.`);
+
+  const signer = await getUserSessionKeySigner(addr);
+  const msg = await createGetLedgerBalancesMessage(signer);
+
+  const raw = await sendAndWait(userWs, msg);
+  const parsed = parseAnyRPCResponse(raw);
+
+  if (parsed.method === RPCMethod.Error) {
+    throw new Error(`get_ledger_balances failed: ${JSON.stringify(parsed.params)}`);
+  }
+
+  const data = parsed.params as any;
+  return (data.ledger_balances || []).map((b: any) => ({
+    asset: b.asset,
+    amount: b.amount,
+  }));
+}
+
+/**
+ * Get user's channels from the clearnode (no auth required, but uses authenticated WS).
+ */
+export async function getChannels(
+  userAddress?: Address,
+): Promise<ChannelRecord[]> {
+  if (!engineWs) throw new Error('Engine WS not connected');
+
+  const participant = userAddress ? getAddress(userAddress) : undefined;
+  const msg = createGetChannelsMessageV2(participant, 'open' as any);
+
+  const raw = await sendAndWait(engineWs, msg);
+  const parsed = parseAnyRPCResponse(raw);
+
+  if (parsed.method === RPCMethod.Error) {
+    throw new Error(`get_channels failed: ${JSON.stringify(parsed.params)}`);
+  }
+
+  const data = parsed.params as any;
+  const channels = data.channels || data || [];
+  if (!Array.isArray(channels)) return [];
+
+  return channels.map((ch: any) => ({
+    channelId: ch.channel_id || ch.channelId,
+    status: ch.status,
+    token: ch.token,
+    amount: String(ch.amount || '0'),
+    chainId: ch.chain_id || ch.chainId || 0,
+  }));
+}
+
+/**
+ * Helper: get a MessageSigner for a user's session key from the DB.
+ */
+async function getUserSessionKeySigner(userAddress: string) {
+  // We need the DB pool — import it from the module scope
+  // The session key private key is stored encrypted in DB
+  const result = await sessionKeyDb.query(
+    `SELECT private_key FROM session_keys
+     WHERE owner = $1 AND status = 'ACTIVE' AND expires_at > NOW()
+     LIMIT 1`,
+    [getAddress(userAddress as Address)],
+  );
+
+  if (result.rows.length === 0) {
+    throw new Error(`No active session key for ${userAddress}`);
+  }
+
+  return createECDSAMessageSigner(result.rows[0].private_key as Hex);
+}
+
+// DB reference for session key lookups (set during init)
+let sessionKeyDb: Pool;
+
+export function setChannelDb(pool: Pool): void {
+  sessionKeyDb = pool;
 }
 
 export { sendAndWait };
