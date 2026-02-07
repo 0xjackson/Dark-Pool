@@ -340,6 +340,111 @@ export async function createSessionKey(userAddress: string): Promise<SessionKeyC
   }
 }
 
+// ---------------------------------------------------------------------------
+// Channel management API
+// ---------------------------------------------------------------------------
+
+export interface ChannelInfo {
+  channelId: string;
+  channel: {
+    participants: string[];
+    adjudicator: string;
+    challenge: number;
+    nonce: number;
+  };
+  state: {
+    intent: number;
+    version: number;
+    stateData: string;
+    allocations: Array<{
+      destination: string;
+      token: string;
+      amount: string;
+    }>;
+  };
+  serverSignature: string;
+}
+
+export interface LedgerBalance {
+  asset: string;
+  amount: string;
+}
+
+export interface ChannelRecord {
+  channelId: string;
+  status: string;
+  token: string;
+  amount: string;
+  chainId: number;
+}
+
+/**
+ * Request channel creation from the clearnode via backend
+ */
+export async function requestCreateChannel(
+  userAddress: string,
+  token: string,
+  chainId?: number,
+): Promise<ChannelInfo> {
+  const url = `${API_BASE_URL}/api/channel/create`;
+  const response = await fetchWithTimeout(
+    url,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userAddress, token, chainId }),
+    },
+    DEFAULT_TIMEOUT,
+  );
+  if (!response.ok) throw await createApiErrorFromResponse(response, 'Failed to create channel');
+  return response.json();
+}
+
+/**
+ * Request channel resize from the clearnode via backend
+ */
+export async function requestResizeChannel(
+  userAddress: string,
+  channelId: string,
+  resizeAmount: string,
+  allocateAmount: string,
+): Promise<ChannelInfo> {
+  const url = `${API_BASE_URL}/api/channel/resize`;
+  const response = await fetchWithTimeout(
+    url,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userAddress, channelId, resizeAmount, allocateAmount }),
+    },
+    DEFAULT_TIMEOUT,
+  );
+  if (!response.ok) throw await createApiErrorFromResponse(response, 'Failed to resize channel');
+  return response.json();
+}
+
+/**
+ * Get unified (ledger) balances for a user from the clearnode
+ */
+export async function getLedgerBalances(userAddress: string): Promise<LedgerBalance[]> {
+  const url = `${API_BASE_URL}/api/channel/balances?address=${encodeURIComponent(userAddress)}`;
+  const response = await fetchWithTimeout(url, { method: 'GET' }, DEFAULT_TIMEOUT);
+  if (!response.ok) throw await createApiErrorFromResponse(response, 'Failed to get balances');
+  const data = await response.json();
+  return data.balances || [];
+}
+
+/**
+ * Get user's Yellow Network channels
+ */
+export async function getChannels(userAddress: string): Promise<ChannelRecord[]> {
+  const url = `${API_BASE_URL}/api/channel/list?address=${encodeURIComponent(userAddress)}`;
+  const response = await fetchWithTimeout(url, { method: 'GET' }, DEFAULT_TIMEOUT);
+  if (!response.ok) throw await createApiErrorFromResponse(response, 'Failed to list channels');
+  const data = await response.json();
+  return data.channels || [];
+}
+
 /**
  * Activates a session key after user signs the EIP-712 challenge
  * @param userAddress - User's wallet address

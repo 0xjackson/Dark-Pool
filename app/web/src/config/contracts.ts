@@ -6,6 +6,12 @@ export const ROUTER_ADDRESS = (process.env.NEXT_PUBLIC_ROUTER_ADDRESS ||
   '0x0000000000000000000000000000000000000000') as `0x${string}`;
 
 /**
+ * Yellow Network Custody contract address
+ */
+export const CUSTODY_ADDRESS = (process.env.NEXT_PUBLIC_CUSTODY_ADDRESS ||
+  '0x0000000000000000000000000000000000000000') as `0x${string}`;
+
+/**
  * Minimal ERC20 ABI for allowance checks and approvals
  */
 export const ERC20_ABI = [
@@ -137,5 +143,117 @@ export const ROUTER_ABI = [
       { name: 'buyerFillAmount', type: 'uint256' },
     ],
     outputs: [],
+  },
+] as const;
+
+/**
+ * Yellow Custody ABI — deposit, create, resize, and balance query functions.
+ * Used by the deposit flow to interact with the Custody contract on-chain.
+ */
+export const CUSTODY_ABI = [
+  {
+    name: 'deposit',
+    type: 'function',
+    stateMutability: 'payable',
+    inputs: [
+      { name: 'account', type: 'address' },
+      { name: 'token', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [],
+  },
+  {
+    name: 'create',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      {
+        name: 'ch',
+        type: 'tuple',
+        components: [
+          { name: 'participants', type: 'address[]' },
+          { name: 'adjudicator', type: 'address' },
+          { name: 'challenge', type: 'uint256' },
+          { name: 'nonce', type: 'uint256' },
+        ],
+      },
+      {
+        name: 'initial',
+        type: 'tuple',
+        components: [
+          { name: 'intent', type: 'uint8' },
+          { name: 'version', type: 'uint256' },
+          { name: 'data', type: 'bytes' },
+          {
+            name: 'allocations',
+            type: 'tuple[]',
+            components: [
+              { name: 'destination', type: 'address' },
+              { name: 'token', type: 'address' },
+              { name: 'amount', type: 'uint256' },
+            ],
+          },
+          { name: 'sigs', type: 'bytes[]' },
+        ],
+      },
+    ],
+    outputs: [{ name: 'channelId', type: 'bytes32' }],
+  },
+  {
+    name: 'resize',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'channelId', type: 'bytes32' },
+      {
+        name: 'candidate',
+        type: 'tuple',
+        components: [
+          { name: 'intent', type: 'uint8' },
+          { name: 'version', type: 'uint256' },
+          { name: 'data', type: 'bytes' },
+          {
+            name: 'allocations',
+            type: 'tuple[]',
+            components: [
+              { name: 'destination', type: 'address' },
+              { name: 'token', type: 'address' },
+              { name: 'amount', type: 'uint256' },
+            ],
+          },
+          { name: 'sigs', type: 'bytes[]' },
+        ],
+      },
+      {
+        name: 'proofs',
+        type: 'tuple[]',
+        components: [
+          { name: 'intent', type: 'uint8' },
+          { name: 'version', type: 'uint256' },
+          { name: 'data', type: 'bytes' },
+          {
+            name: 'allocations',
+            type: 'tuple[]',
+            components: [
+              { name: 'destination', type: 'address' },
+              { name: 'token', type: 'address' },
+              { name: 'amount', type: 'uint256' },
+            ],
+          },
+          { name: 'sigs', type: 'bytes[]' },
+        ],
+      },
+    ],
+    outputs: [],
+  },
+  {
+    name: 'getAccountsBalances',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'accounts', type: 'address[]' },
+      { name: 'tokens', type: 'address[]' },
+    ],
+    outputs: [{ name: '', type: 'uint256[][]' }],
   },
 ] as const;
