@@ -100,8 +100,10 @@ message SubmitOrderRequest {
   int32 variance_bps = 8;  // 0-10000 (0% - 100%)
   int64 expires_in_seconds = 9;  // Time to live
   string commitment_hash = 10;
-  string order_signature = 11;
-  string order_data = 12;  // JSON string
+  // Fields 11-12 removed (were order_signature, order_data — EIP-712 remnants)
+  string order_id = 13;          // On-chain orderId (bytes32 hex, 253-bit masked)
+  string sell_amount = 14;       // Exact wei amount committed on-chain
+  string min_buy_amount = 15;    // Exact wei minimum buy amount from commitment
 }
 
 // SubmitOrderResponse returns the created order

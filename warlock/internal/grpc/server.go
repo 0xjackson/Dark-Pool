@@ -113,14 +113,14 @@ func (s *Server) SubmitOrder(ctx context.Context, req *pb.SubmitOrderRequest) (*
 			id, user_address, chain_id, order_type, base_token, quote_token,
 			quantity, price, variance_bps, min_price, max_price,
 			filled_quantity, remaining_quantity, status,
-			commitment_hash, order_signature, order_data, expires_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+			commitment_hash, order_id, sell_amount, min_buy_amount, expires_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 	`,
 		orderID, req.UserAddress, req.ChainId, orderTypeToString(req.OrderType),
 		req.BaseToken, req.QuoteToken,
 		quantity.String(), price.String(), req.VarianceBps, minPrice.String(), maxPrice.String(),
 		"0", quantity.String(), "REVEALED",
-		req.CommitmentHash, req.OrderSignature, req.OrderData, nullTimeOrValue(expiresAt),
+		req.CommitmentHash, req.OrderId, req.SellAmount, req.MinBuyAmount, nullTimeOrValue(expiresAt),
 	)
 	if err != nil {
 		log.Error().Err(err).Msg("Failed to insert order")
