@@ -6,6 +6,7 @@ import { Container } from '@/components/ui/Container';
 import { Logo } from '@/components/ui/Logo';
 import { ConnectWallet } from '@/components/wallet/ConnectWallet';
 import { WalletButton } from '@/components/wallet/WalletButton';
+import { BalancePanel } from '@/components/wallet/BalancePanel';
 import { useWalletConnection } from '@/hooks/useWalletConnection';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 
@@ -33,7 +34,10 @@ export default function Home() {
       {/* Header - Wallet Controls (top-right) */}
       <div className="absolute top-0 right-0 p-8 z-20">
         {isConnected ? (
-          <WalletButton />
+          <div className="flex flex-col items-end">
+            <WalletButton />
+            <BalancePanel />
+          </div>
         ) : (
           <ConnectButton.Custom>
             {({
