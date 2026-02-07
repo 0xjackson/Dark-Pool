@@ -12,6 +12,7 @@ import {
   createAppSessionMessage,
   createCloseAppSessionMessage,
   createRevokeSessionKeyMessage,
+  createPingMessageV2,
   parseAuthChallengeResponse,
   parseAnyRPCResponse,
   parseGetAssetsResponse,
@@ -27,6 +28,7 @@ import { generateSessionKey } from '../utils/keygen';
 const YELLOW_WS_URL = process.env.YELLOW_WS_URL || 'wss://clearnet-sandbox.yellow.com/ws';
 const ENGINE_WALLET_KEY = process.env.ENGINE_WALLET_KEY as Hex | undefined;
 const RESPONSE_TIMEOUT = 10_000;
+const PING_INTERVAL_MS = 30_000; // Send ping every 30s to keep WS alive
 
 // Asset map: token address -> Yellow symbol (e.g. "0x1234..." -> "usdc")
 let assetMap: Map<string, string> = new Map();
@@ -35,6 +37,7 @@ let assetMap: Map<string, string> = new Map();
 let engineWs: WebSocket | null = null;
 let engineSessionKeyAddress: Address | null = null;
 let engineMessageSigner: ReturnType<typeof createECDSAMessageSigner> | null = null;
+let enginePingInterval: ReturnType<typeof setInterval> | null = null;
 
 // User WS pool: userAddress -> WebSocket
 const userWsPool: Map<string, WebSocket> = new Map();
@@ -212,9 +215,19 @@ export async function initEngineConnection(db: Pool): Promise<void> {
     console.log(`Re-authenticated warlock session key: ${skAddress}`);
   }
 
+  // Start keepalive pings
+  if (enginePingInterval) clearInterval(enginePingInterval);
+  enginePingInterval = setInterval(() => {
+    if (engineWs && engineWs.readyState === WebSocket.OPEN) {
+      const pingMsg = createPingMessageV2();
+      engineWs.send(pingMsg);
+    }
+  }, PING_INTERVAL_MS);
+
   // Auto-reconnect on close
   engineWs.on('close', () => {
     console.warn('Engine WS closed, reconnecting in 5s...');
+    if (enginePingInterval) { clearInterval(enginePingInterval); enginePingInterval = null; }
     engineWs = null;
     setTimeout(() => initEngineConnection(db).catch(console.error), 5000);
   });
