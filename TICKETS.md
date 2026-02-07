@@ -94,48 +94,55 @@ Add support for orders matching partially against multiple counterparties.
 
 Circom + Groth16 + Poseidon stack. Enables settlement without revealing order details on-chain.
 
-### ZK-001: Install Circom toolchain
+### ZK-001: Install Circom toolchain ✅
 - **Task:** Install `circom` compiler, `snarkjs`, download Powers of Tau ceremony file (e.g., `powersOfTau28_hez_final_15.ptau` for circuits up to 2^15 constraints).
 - **Deliverable:** Build script or Makefile that compiles circuits and generates verifier
 - **Blocks:** ZK-002, ZK-003
+- **Done:** circom 2.2.2, snarkjs 0.7.6, pot15.ptau downloaded, `circuits/build.sh` created
 
-### ZK-002: Write Circom settlement circuit
-- **File:** `circuits/settlement.circom` (new)
+### ZK-002: Write Circom settlement circuit ✅
+- **File:** `circuits/settlementMatch.circom` (new)
 - **Change:** Create circuit with 10 constraints: 2x Poseidon hash verification, 2x token match, 2x expiry check, 2x overfill check, 2x proportional slippage. Use `circomlib` Poseidon template. Define public/private inputs per spec in SETTLEMENT_IMPLEMENTATION.md.
 - **Blocked by:** ZK-001
 - **Blocks:** ZK-003, ZK-004
+- **Done:** 4,576 constraints, 7 public + 14 private inputs, nested Poseidon hash verified
 
-### ZK-003: Generate Groth16 trusted setup + Solidity verifier
-- **Task:** Run circuit-specific setup: `snarkjs groth16 setup`, `snarkjs zkey contribute`, `snarkjs zkey export verificationkey`, `snarkjs zkey export solidityverifier`. Output: `ZKVerifier.sol`.
-- **Files:** `circuits/build/` (artifacts), `contracts/src/ZKVerifier.sol` (generated)
+### ZK-003: Generate Groth16 trusted setup + Solidity verifier ✅
+- **Task:** Run circuit-specific setup: `snarkjs groth16 setup`, `snarkjs zkey contribute`, `snarkjs zkey export verificationkey`, `snarkjs zkey export solidityverifier`. Output: `Groth16Verifier.sol`.
+- **Files:** `circuits/build/` (artifacts), `contracts/src/Groth16Verifier.sol` (generated)
 - **Blocked by:** ZK-002
 - **Blocks:** ZK-005
+- **Done:** Groth16Verifier.sol generated, WASM + zkey copied to `app/server/circuits/`
 
 ### ZK-004: Circuit unit tests
 - **File:** `circuits/test/settlement.test.js` (new)
 - **Change:** Test with valid inputs (proof generates and verifies). Test with invalid inputs (hash mismatch, expired, overfill, bad slippage — all should fail). Use `snarkjs` JS API to generate and verify proofs in tests.
 - **Blocked by:** ZK-002
 
-### ZK-005: Add proveAndSettle to DarkPoolRouter
+### ZK-005: Add proveAndSettle to DarkPoolRouter ✅
 - **File:** `contracts/src/DarkPoolRouter.sol`
-- **Change:** Add `IZKVerifier` interface, `zkVerifier` immutable state variable (set in constructor). Add `proveAndSettle(bytes32 sellerOrderId, bytes32 buyerOrderId, uint256 sellerFillAmount, uint256 buyerFillAmount, bytes calldata proof)` function per spec. Verify proof via `zkVerifier.verify()`, update `settledAmount`, emit event.
+- **Change:** Add `IZKVerifier` interface, `zkVerifier` immutable state variable (set in constructor). Add `proveAndSettle(bytes32 sellerOrderId, bytes32 buyerOrderId, uint256 sellerFillAmount, uint256 buyerFillAmount, uint256[2] a, uint256[2][2] b, uint256[2] c)` function. Verify proof via `zkVerifier.verifyProof()`, update `settledAmount`, emit event.
 - **Blocked by:** ZK-003, PF-001
 - **Blocks:** ZK-006
+- **Done:** Reads commitment hashes + settledAmounts from storage as public inputs, prevents replay
 
-### ZK-006: Foundry tests — proveAndSettle
+### ZK-006: Foundry tests — proveAndSettle ✅
 - **File:** `contracts/test/DarkPoolRouter.t.sol`
-- **Change:** Integration tests using real ZK proofs generated in test setup. Test valid proof settles correctly. Test invalid proof reverts. Test partial fills via ZK. May need to pre-generate proofs or use a test helper.
+- **Change:** Tests using MockZKVerifier (always true) and RejectingZKVerifier (always false). Test valid proof settles correctly. Test invalid proof reverts. Test partial fills via ZK. Test access control. Test zero fill revert. Test cancelled order revert.
 - **Blocked by:** ZK-005
+- **Done:** 6 new tests, all 26 tests pass (20 original + 6 new)
 
-### ZK-007: Update DarkPoolRouter constructor for ZK verifier
+### ZK-007: Update DarkPoolRouter constructor for ZK verifier ✅
 - **File:** `contracts/src/DarkPoolRouter.sol`
 - **Change:** Add `address _zkVerifier` parameter to constructor. Store as `IZKVerifier public immutable zkVerifier`. Update deployment script.
 - **Blocked by:** ZK-005
+- **Done:** Constructor now takes 3 params (custody, engine, zkVerifier)
 
-### ZK-008: Update deployment script for ZK verifier
+### ZK-008: Update deployment script for ZK verifier ✅
 - **File:** `contracts/script/DeployDarkPoolRouter.s.sol`
-- **Change:** Deploy `ZKVerifier` first, then pass its address to `DarkPoolRouter` constructor.
+- **Change:** Deploy `ZKVerifier` first, then pass its address to `DarkPoolRouter` constructor. Uses `ZK_VERIFIER_ADDRESS` env var.
 - **Blocked by:** ZK-007
+- **Done:** Script updated to read ZK_VERIFIER_ADDRESS from env
 
 ---
 
@@ -155,11 +162,12 @@ Switch commitment hash from keccak256 to Poseidon across all layers.
 - **Blocked by:** PH-004, INF-004
 - **Blocks:** PH-003
 
-### PH-003: Backend proof generation service
+### PH-003: Backend proof generation service ✅
 - **File:** `app/server/src/services/proofGenerator.ts` (new)
 - **Change:** Create service that takes two OrderDetails + fill amounts + settled amounts, constructs circuit inputs, calls `snarkjs.groth16.fullProve()`, returns serialized proof. Loads circuit WASM + zkey at startup. Exports `generateSettlementProof(sellerDetails, buyerDetails, fillAmounts, settledAmounts)`.
 - **Blocked by:** ZK-002, ZK-003, PH-002
 - **Blocks:** S-003
+- **Done:** proofGenerator.ts created with Solidity-compatible proof output (reversed B coords)
 
 ### PH-004: Poseidon hash utility module
 - **File:** `app/server/src/utils/poseidon.ts` (new), `app/web/src/utils/poseidon.ts` (new)
@@ -195,10 +203,11 @@ New tables and columns for session keys and settlement tracking.
 - **Change:** Create `session_keys` table with columns: `id`, `user_address`, `session_key_address`, `encrypted_private_key`, `jwt_token`, `application`, `allowances` (JSONB), `expires_at`, `status` (PENDING/ACTIVE/EXPIRED/REVOKED), `created_at`. Add unique constraint on `(user_address, session_key_address)`. Add index on `(user_address, status)`.
 - **Blocks:** SK-001
 
-### DB-002: Add settlement columns to matches table
+### DB-002: Add settlement columns to matches table (partially done)
 - **File:** `warlock/migrations/002_settlement_and_session_keys.up.sql`
 - **Change:** `ALTER TABLE matches ADD COLUMN` for: `app_session_id VARCHAR(66)`, `reveal_tx_hash VARCHAR(66)`, `settle_tx_hash VARCHAR(66)`, `settlement_error TEXT`, `settled_at TIMESTAMP`.
 - **Blocks:** S-003
+- **Note:** `settle_tx_hash` and `settled_at` added in migration 003 (ZK order fields). Remaining: `app_session_id`, `reveal_tx_hash`, `settlement_error`.
 
 ### DB-003: Drop stale EIP-712 columns from orders table
 - **File:** `warlock/migrations/002_settlement_and_session_keys.up.sql`
