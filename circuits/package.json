@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "mocha test/*.test.js --timeout 30000"
   },
   "keywords": [],
   "author": "",
@@ -11,5 +11,11 @@
   "description": "",
   "dependencies": {
     "circomlib": "^2.0.5"
+  },
+  "devDependencies": {
+    "chai": "^6.2.2",
+    "circomlibjs": "^0.1.7",
+    "mocha": "^11.7.5",
+    "snarkjs": "^0.7.6"
   }
 }
