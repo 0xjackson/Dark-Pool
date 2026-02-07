@@ -8,7 +8,7 @@
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
     "docker:logs": "docker-compose logs -f",
-    "migrate": "docker exec -i darkpool-postgres psql -U darkpool -d darkpool < warlock/migrations/001_initial_schema.up.sql"
+    "migrate": "docker exec -i darkpool-postgres psql -U darkpool -d darkpool < warlock/migrations/001_initial_schema.up.sql && docker exec -i darkpool-postgres psql -U darkpool -d darkpool < warlock/migrations/002_session_keys.up.sql && docker exec -i darkpool-postgres psql -U darkpool -d darkpool < warlock/migrations/003_zk_order_fields.up.sql"
   },
   "repository": {
     "type": "git",
