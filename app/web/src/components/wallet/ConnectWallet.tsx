@@ -1,13 +1,9 @@
 'use client';
 
-import { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { useAccount } from 'wagmi';
 import { useTradeModal } from '@/hooks/useTradeModal';
 import { TradeModal } from '@/components/trading/TradeModal';
-import { OrdersDrawer } from '@/components/trading/OrdersDrawer';
-import { OrdersDrawerToggle } from '@/components/trading/OrdersDrawerToggle';
-import { useUserOrders } from '@/hooks/useUserOrders';
 import { useSessionKey } from '@/hooks/useSessionKey';
 
 /**
@@ -19,35 +15,21 @@ import { useSessionKey } from '@/hooks/useSessionKey';
  * - Smooth entrance animation
  * - Orders drawer integration
  */
-export function ConnectWallet() {
+interface ConnectWalletProps {
+  onOrderSuccess?: () => void;
+}
+
+export function ConnectWallet({ onOrderSuccess }: ConnectWalletProps) {
   const { isOpen, openModal, closeModal } = useTradeModal();
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const { address, isConnected } = useAccount();
+  const { isConnected } = useAccount();
   const { status: sessionKeyStatus, isLoading: sessionKeyLoading, error: sessionKeyError, retry: retrySessionKey } = useSessionKey();
 
-  // Fetch orders to show pending count on toggle button
-  const { orders } = useUserOrders(address, {
-    autoRefresh: true,
-    refreshInterval: 10000,
-  });
-
-  // Count pending orders
-  const pendingCount = useMemo(() => {
-    return orders.filter(
-      (order) => order.status === 'PENDING' || order.status === 'PARTIALLY_FILLED'
-    ).length;
-  }, [orders]);
-
-  // Handle successful order submission
   const handleOrderSuccess = () => {
-    // Trigger refresh in the drawer
-    setRefreshTrigger((prev) => prev + 1);
+    onOrderSuccess?.();
   };
 
   return (
-    <>
-      <motion.div
+    <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
@@ -88,22 +70,5 @@ export function ConnectWallet() {
           onOrderSuccess={handleOrderSuccess}
         />
       </motion.div>
-
-      {/* Orders Drawer Toggle (only show when wallet is connected) */}
-      {address && (
-        <OrdersDrawerToggle
-          onClick={() => setIsDrawerOpen(true)}
-          pendingCount={pendingCount}
-        />
-      )}
-
-      {/* Orders Drawer */}
-      <OrdersDrawer
-        isOpen={isDrawerOpen}
-        onClose={() => setIsDrawerOpen(false)}
-        userAddress={address}
-        onRefreshTrigger={refreshTrigger}
-      />
-    </>
   );
 }

@@ -21,7 +21,7 @@ export function OrdersDrawerToggle({ onClick, pendingCount }: OrdersDrawerToggle
     <motion.button
       type="button"
       onClick={onClick}
-      className="fixed top-24 right-8 z-40 flex items-center gap-2 px-4 py-3 bg-dark-elevated/80 backdrop-blur-xl border border-purple-primary/30 hover:border-purple-primary/50 rounded-lg shadow-lg hover:shadow-purple-glow/20 transition-all duration-200 group"
+      className="mt-3 z-40 flex items-center gap-2 px-4 py-3 bg-dark-elevated/80 backdrop-blur-xl border border-purple-primary/30 hover:border-purple-primary/50 rounded-lg shadow-lg hover:shadow-purple-glow/20 transition-all duration-200 group"
       whileHover={{ scale: 1.05 }}
       whileTap={{ scale: 0.95 }}
       aria-label="Toggle orders drawer"

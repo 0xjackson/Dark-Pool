@@ -1,5 +1,7 @@
 'use client';
 
+import { useState, useMemo } from 'react';
+import { useAccount } from 'wagmi';
 import { PoolBackground } from '@/components/animations/PoolBackground';
 import { GlowOrb } from '@/components/animations/GlowOrb';
 import { Container } from '@/components/ui/Container';
@@ -7,11 +9,32 @@ import { Logo } from '@/components/ui/Logo';
 import { ConnectWallet } from '@/components/wallet/ConnectWallet';
 import { WalletButton } from '@/components/wallet/WalletButton';
 import { BalancePanel } from '@/components/wallet/BalancePanel';
+import { OrdersDrawerToggle } from '@/components/trading/OrdersDrawerToggle';
+import { OrdersDrawer } from '@/components/trading/OrdersDrawer';
 import { useWalletConnection } from '@/hooks/useWalletConnection';
+import { useUserOrders } from '@/hooks/useUserOrders';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 
 export default function Home() {
   const { isConnected } = useWalletConnection();
+  const { address } = useAccount();
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+  const { orders } = useUserOrders(address, {
+    autoRefresh: true,
+    refreshInterval: 10000,
+  });
+
+  const pendingCount = useMemo(() => {
+    return orders.filter(
+      (order) => order.status === 'PENDING' || order.status === 'PARTIALLY_FILLED'
+    ).length;
+  }, [orders]);
+
+  const handleOrderSuccess = () => {
+    setRefreshTrigger((prev) => prev + 1);
+  };
 
   return (
     <main className="relative h-screen bg-gradient-to-br from-dark-bg via-dark-surface to-dark-elevated overflow-hidden flex flex-col">
@@ -37,6 +60,12 @@ export default function Home() {
           <div className="flex flex-col items-end">
             <WalletButton />
             <BalancePanel />
+            {address && (
+              <OrdersDrawerToggle
+                onClick={() => setIsDrawerOpen(true)}
+                pendingCount={pendingCount}
+              />
+            )}
           </div>
         ) : (
           <ConnectButton.Custom>
@@ -78,8 +107,16 @@ export default function Home() {
 
       {/* Main Content - Hero Section (always visible) */}
       <div className="relative z-10 flex-1 flex items-center justify-center p-8">
-        <ConnectWallet />
+        <ConnectWallet onOrderSuccess={handleOrderSuccess} />
       </div>
+
+      {/* Orders Drawer */}
+      <OrdersDrawer
+        isOpen={isDrawerOpen}
+        onClose={() => setIsDrawerOpen(false)}
+        userAddress={address}
+        onRefreshTrigger={refreshTrigger}
+      />
     </main>
   );
 }
