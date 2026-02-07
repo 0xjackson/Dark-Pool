@@ -107,6 +107,9 @@ router.post('/', async (req: Request, res: Response) => {
       price,
       variance_bps: varianceBps,
       commitment_hash,
+      order_id,
+      sell_amount,
+      min_buy_amount,
     });
 
     res.status(201).json({

@@ -65,8 +65,9 @@ export interface SubmitOrderRequest {
   variance_bps: number;
   expires_in_seconds?: number;
   commitment_hash?: string;
-  order_signature?: string;
-  order_data?: string;
+  order_id?: string;
+  sell_amount?: string;
+  min_buy_amount?: string;
 }
 
 export interface PriceLevel {
@@ -114,8 +115,9 @@ export class WarlockClient extends EventEmitter {
         variance_bps: request.variance_bps,
         expires_in_seconds: request.expires_in_seconds || 0,
         commitment_hash: request.commitment_hash || '',
-        order_signature: request.order_signature || '',
-        order_data: request.order_data || '',
+        order_id: request.order_id || '',
+        sell_amount: request.sell_amount || '',
+        min_buy_amount: request.min_buy_amount || '',
       };
 
       this.client.SubmitOrder(grpcRequest, (error: any, response: any) => {

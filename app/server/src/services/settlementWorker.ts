@@ -6,10 +6,20 @@ import {
   createAppSession,
   closeAppSession,
 } from './yellowConnection';
+import { generateSettlementProof } from './proofGenerator';
+import { getEngineWalletClient, getPublicClient } from './engineWallet';
 import DarkPoolWebSocketServer from '../websocket/server';
 
 const POLL_INTERVAL = 2000;
 const BATCH_SIZE = 10;
+
+const ROUTER_ADDRESS = process.env.ROUTER_ADDRESS as Address | undefined;
+
+const ROUTER_ABI = [
+  'function proveAndSettle(bytes32 sellerOrderId, bytes32 buyerOrderId, uint256 sellerFillAmount, uint256 buyerFillAmount, uint256[2] calldata a, uint256[2][2] calldata b, uint256[2] calldata c) external',
+  'function markFullySettled(bytes32 orderId) external',
+  'function commitments(bytes32) view returns (address user, bytes32 orderHash, uint256 timestamp, uint256 settledAmount, uint8 status)',
+] as const;
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let db: Pool;
@@ -97,7 +107,75 @@ async function settleMatch(match: any): Promise<void> {
   const seller = match.seller_address as Address;
   const buyer = match.buyer_address as Address;
 
-  // STEP 3: Create app session on Yellow
+  // STEP 3: Load full order details for ZK proof generation
+  const sellerOrder = await loadOrderDetails(match.sell_order_id);
+  const buyerOrder = await loadOrderDetails(match.buy_order_id);
+
+  // STEP 4: Generate ZK proof
+  console.log(`Match ${match.id}: generating ZK proof...`);
+  const proof = await generateSettlementProof(
+    {
+      orderId: sellerOrder.order_id,
+      user: sellerOrder.user_address,
+      sellToken: sellerOrder.base_token,
+      buyToken: sellerOrder.quote_token,
+      sellAmount: sellerOrder.sell_amount,
+      minBuyAmount: sellerOrder.min_buy_amount,
+      expiresAt: Math.floor(new Date(sellerOrder.expires_at).getTime() / 1000),
+    },
+    {
+      orderId: buyerOrder.order_id,
+      user: buyerOrder.user_address,
+      sellToken: buyerOrder.base_token,
+      buyToken: buyerOrder.quote_token,
+      sellAmount: buyerOrder.sell_amount,
+      minBuyAmount: buyerOrder.min_buy_amount,
+      expiresAt: Math.floor(new Date(buyerOrder.expires_at).getTime() / 1000),
+    },
+    sellerOrder.commitment_hash,
+    buyerOrder.commitment_hash,
+    match.quantity,      // sellerFillAmount
+    quoteAmount,         // buyerFillAmount
+    '0',                 // sellerSettledSoFar (TODO: read from on-chain or track in DB)
+    '0',                 // buyerSettledSoFar
+    Math.floor(Date.now() / 1000),
+  );
+  console.log(`Match ${match.id}: ZK proof generated`);
+
+  // STEP 5: Call proveAndSettle on-chain
+  if (ROUTER_ADDRESS) {
+    const walletClient = getEngineWalletClient();
+    const publicClient = getPublicClient();
+
+    const txHash = await walletClient.writeContract({
+      address: ROUTER_ADDRESS,
+      abi: ROUTER_ABI,
+      functionName: 'proveAndSettle',
+      args: [
+        sellerOrder.order_id as Hex,
+        buyerOrder.order_id as Hex,
+        BigInt(match.quantity),
+        BigInt(quoteAmount),
+        proof.a.map(BigInt) as [bigint, bigint],
+        proof.b.map((row: string[]) => row.map(BigInt)) as [[bigint, bigint], [bigint, bigint]],
+        proof.c.map(BigInt) as [bigint, bigint],
+      ],
+    });
+
+    await publicClient.waitForTransactionReceipt({ hash: txHash });
+
+    // Store tx hash
+    await db.query(
+      `UPDATE matches SET settle_tx_hash = $2 WHERE id = $1`,
+      [match.id, txHash],
+    );
+
+    console.log(`Match ${match.id}: proveAndSettle tx ${txHash}`);
+  } else {
+    console.warn(`Match ${match.id}: ROUTER_ADDRESS not set, skipping on-chain settlement`);
+  }
+
+  // STEP 6: Create app session on Yellow
   const appSessionId = await createAppSession(
     sellerKey.private_key as Hex,
     buyerKey.private_key as Hex,
@@ -117,13 +195,46 @@ async function settleMatch(match: any): Promise<void> {
 
   console.log(`Match ${match.id}: app session created ${appSessionId}`);
 
-  // STEP 4: Close app session (THE SWAP — redistribute funds)
+  // STEP 7: Close app session (THE SWAP — redistribute funds)
   await closeAppSession(appSessionId as Hex, [
     { participant: seller, asset: quoteSymbol, amount: quoteAmount }, // seller GETS quote
     { participant: buyer, asset: baseSymbol, amount: match.quantity }, // buyer GETS base
     { participant: engineAddress, asset: baseSymbol, amount: '0' },
     { participant: engineAddress, asset: quoteSymbol, amount: '0' },
   ]);
+
+  // STEP 8: Check if orders fully filled → call markFullySettled
+  if (ROUTER_ADDRESS) {
+    const walletClient = getEngineWalletClient();
+
+    const sellerRemaining = await db.query(
+      `SELECT remaining_quantity FROM orders WHERE id = $1`,
+      [match.sell_order_id],
+    );
+    if (sellerRemaining.rows[0]?.remaining_quantity === '0') {
+      await walletClient.writeContract({
+        address: ROUTER_ADDRESS,
+        abi: ROUTER_ABI,
+        functionName: 'markFullySettled',
+        args: [sellerOrder.order_id as Hex],
+      });
+      console.log(`Match ${match.id}: seller order marked fully settled`);
+    }
+
+    const buyerRemaining = await db.query(
+      `SELECT remaining_quantity FROM orders WHERE id = $1`,
+      [match.buy_order_id],
+    );
+    if (buyerRemaining.rows[0]?.remaining_quantity === '0') {
+      await walletClient.writeContract({
+        address: ROUTER_ADDRESS,
+        abi: ROUTER_ABI,
+        functionName: 'markFullySettled',
+        args: [buyerOrder.order_id as Hex],
+      });
+      console.log(`Match ${match.id}: buyer order marked fully settled`);
+    }
+  }
 
   await db.query(
     `UPDATE matches SET settlement_status = 'SETTLED', settled_at = NOW()
@@ -133,7 +244,7 @@ async function settleMatch(match: any): Promise<void> {
 
   console.log(`Match ${match.id}: SETTLED`);
 
-  // STEP 5: Notify via WebSocket
+  // STEP 9: Notify via WebSocket
   if (wsServer) {
     const notification = {
       type: 'settlement',
@@ -143,6 +254,18 @@ async function settleMatch(match: any): Promise<void> {
     wsServer.broadcast(`matches:${match.buyer_address}`, notification);
     wsServer.broadcast(`matches:${match.seller_address}`, notification);
   }
+}
+
+async function loadOrderDetails(orderId: string) {
+  const result = await db.query(
+    `SELECT id, user_address, base_token, quote_token,
+            order_id, sell_amount, min_buy_amount, commitment_hash,
+            quantity, price, expires_at
+     FROM orders WHERE id = $1`,
+    [orderId],
+  );
+  if (result.rows.length === 0) throw new Error(`Order not found: ${orderId}`);
+  return result.rows[0];
 }
 
 async function loadSessionKey(owner: string): Promise<{ address: string; private_key: string } | null> {
