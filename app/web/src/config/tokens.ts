@@ -1,5 +1,5 @@
 import { Token, TradingPair } from '../types/trading';
-import { mainnet, sepolia } from 'wagmi/chains';
+import { mainnet, sepolia, baseSepolia } from 'wagmi/chains';
 
 /**
  * Token configurations for supported networks
@@ -51,6 +51,24 @@ export const SEPOLIA_TOKENS = {
 } as const;
 
 /**
+ * Base Sepolia testnet token addresses (Yellow Network sandbox)
+ */
+export const BASE_SEPOLIA_TOKENS = {
+  YTEST_USD: {
+    address: '0xDB9F293e3898c9E5536A3be1b0C56c89d2b32DEb',
+    symbol: 'ytest.USD',
+    decimals: 6,
+    name: 'Yellow Test USD',
+  } as Token,
+  ETH: {
+    address: NATIVE_ETH_ADDRESS,
+    symbol: 'ETH',
+    decimals: 18,
+    name: 'Ethereum',
+  } as Token,
+} as const;
+
+/**
  * Trading pairs configuration by chain ID
  */
 export const TRADING_PAIRS: Record<number, TradingPair[]> = {
@@ -73,6 +91,14 @@ export const TRADING_PAIRS: Record<number, TradingPair[]> = {
       id: 'ETH-USDC',
       baseToken: SEPOLIA_TOKENS.ETH,
       quoteToken: SEPOLIA_TOKENS.USDC,
+    },
+  ],
+  // Base Sepolia Testnet (Yellow Network sandbox)
+  [baseSepolia.id]: [
+    {
+      id: 'ETH-ytest.USD',
+      baseToken: BASE_SEPOLIA_TOKENS.ETH,
+      quoteToken: BASE_SEPOLIA_TOKENS.YTEST_USD,
     },
   ],
 };
@@ -109,6 +135,10 @@ export function getChainTokens(chainId: number | undefined): Token[] {
 
   if (chainId === sepolia.id) {
     return Object.values(SEPOLIA_TOKENS);
+  }
+
+  if (chainId === baseSepolia.id) {
+    return Object.values(BASE_SEPOLIA_TOKENS);
   }
 
   return [];
