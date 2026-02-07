@@ -8,10 +8,11 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "moduleResolution": "node",
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "typeRoots": ["./src/types", "./node_modules/@types"]
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
+  "exclude": ["node_modules", "dist", "node_modules/ox", "node_modules/viem"]
 }
