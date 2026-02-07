@@ -33,6 +33,12 @@ RUN npm ci --only=production
 # Copy compiled code from builder
 COPY --from=builder /app/dist ./dist
 
+# Copy proto files (not compiled by tsc)
+COPY --from=builder /app/src/proto ./dist/proto
+
+# Copy ZK circuit files
+COPY --from=builder /app/circuits ./circuits
+
 # Set correct permissions
 RUN chown -R expressjs:nodejs /app
 
