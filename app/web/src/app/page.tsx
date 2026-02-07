@@ -10,7 +10,7 @@ import { ConnectWallet } from '@/components/wallet/ConnectWallet';
 import { WalletButton } from '@/components/wallet/WalletButton';
 import { BalancePanel } from '@/components/wallet/BalancePanel';
 import { OrdersDrawerToggle } from '@/components/trading/OrdersDrawerToggle';
-import { OrdersDrawer } from '@/components/trading/OrdersDrawer';
+import { OrdersDropdown } from '@/components/trading/OrdersDropdown';
 import { useWalletConnection } from '@/hooks/useWalletConnection';
 import { useUserOrders } from '@/hooks/useUserOrders';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
@@ -61,10 +61,19 @@ export default function Home() {
             <WalletButton />
             <BalancePanel />
             {address && (
-              <OrdersDrawerToggle
-                onClick={() => setIsDrawerOpen(true)}
-                pendingCount={pendingCount}
-              />
+              <>
+                <OrdersDrawerToggle
+                  onClick={() => setIsDrawerOpen((prev) => !prev)}
+                  pendingCount={pendingCount}
+                  isOpen={isDrawerOpen}
+                />
+                <OrdersDropdown
+                  isOpen={isDrawerOpen}
+                  onClose={() => setIsDrawerOpen(false)}
+                  userAddress={address}
+                  onRefreshTrigger={refreshTrigger}
+                />
+              </>
             )}
           </div>
         ) : (
@@ -110,13 +119,6 @@ export default function Home() {
         <ConnectWallet onOrderSuccess={handleOrderSuccess} />
       </div>
 
-      {/* Orders Drawer */}
-      <OrdersDrawer
-        isOpen={isDrawerOpen}
-        onClose={() => setIsDrawerOpen(false)}
-        userAddress={address}
-        onRefreshTrigger={refreshTrigger}
-      />
     </main>
   );
 }
