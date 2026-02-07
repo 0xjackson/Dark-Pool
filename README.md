@@ -6,31 +6,39 @@ Private P2P trading protocol built on [Yellow Network](https://yellow.org). Orde
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                              Frontend                                   │
-│                     Next.js 14 / wagmi / RainbowKit                     │
-│                         portal (:3000)                                  │
-└──────────────────────────────┬──────────────────────────────────────────┘
-                               │ REST + WebSocket
-┌──────────────────────────────▼──────────────────────────────────────────┐
-│                               Engine                                    │
-│              Express / snarkjs / ethers.js / WebSocket                   │
-│                         server (:3001)                                  │
 │                                                                         │
-│   ZK Proof Generation    Settlement Worker    Session Key Management    │
-└─────────┬───────────────────────┬───────────────────────┬───────────────┘
-          │ gRPC                  │ on-chain tx            │ WS
-┌─────────▼─────────┐  ┌─────────▼─────────┐  ┌──────────▼──────────────┐
-│      Warlock       │  │  DarkPoolRouter    │  │    Yellow Network       │
-│   Go / pgx         │  │  Groth16Verifier   │  │    Custody / Clearnet   │
-│   Matching Engine   │  │  PoseidonT4 / T6   │  │    App Sessions         │
-│   (:50051)         │  │  (Solidity)        │  │    Unified Balance      │
-└─────────┬─────────┘  └────────────────────┘  └─────────────────────────┘
-          │
-┌─────────▼─────────┐
-│    PostgreSQL      │
-│  Orders / Matches  │
-│  Session Keys      │
-└───────────────────┘
+│  ┌──────────┐     ┌──────────────┐     ┌─────────────┐                 │
+│  │  Portal  │────►│    Engine    │────►│   Warlock   │                 │
+│  │(Next.js) │◄────│  (Node.js)   │◄────│  (Go gRPC)  │                 │
+│  └──────────┘     └──────────────┘     └─────────────┘                 │
+│       │                │     │               │                         │
+│       │                │     │               ▼                         │
+│       │                │     │         ┌──────────┐                    │
+│       │                │     │         │ Postgres │                    │
+│       │                │     │         └──────────┘                    │
+│       │                │     │                                         │
+│       │           ZK proofs  │                                         │
+│       │           snarkjs    │  session keys                           │
+│       │                │     │  app sessions                           │
+│       │                ▼     ▼                                         │
+│       │          ┌─────────────┐    ┌───────────┐                     │
+│       │          │   Router    │    │  Yellow   │                     │
+│       │          │  Contract   │    │  Network  │                     │
+│       │          │             │    │           │                     │
+│       │          │  Poseidon   │    │  Custody  │                     │
+│       │          │  Groth16    │    │  Clearnet │                     │
+│       │          │  Verifier   │    │  Sessions │                     │
+│       │          └─────────────┘    └───────────┘                     │
+│       │                │                  │                            │
+│       └────────────────┼──────────────────┘                            │
+│  depositAndCommit()    │       settle + transfer                       │
+│                        ▼                                               │
+│                   ┌─────────┐                                          │
+│                   │ EVM     │                                          │
+│                   │ Chain   │                                          │
+│                   └─────────┘                                          │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 **Portal** handles wallet connection and order submission via RainbowKit and wagmi. **Engine** orchestrates everything: generates ZK proofs with snarkjs, submits settlement transactions, and manages Yellow Network App Sessions. **Warlock** is the matching engine, written in Go, running price-time priority with partial fill support. **DarkPoolRouter** stores Poseidon commitments and verifies Groth16 proofs on-chain.
