@@ -9,6 +9,7 @@ import { Logo } from '@/components/ui/Logo';
 import { ConnectWallet } from '@/components/wallet/ConnectWallet';
 import { WalletButton } from '@/components/wallet/WalletButton';
 import { BalancePanel } from '@/components/wallet/BalancePanel';
+import { DepositPanel } from '@/components/trading/DepositPanel';
 import { OrdersDrawerToggle } from '@/components/trading/OrdersDrawerToggle';
 import { OrdersDropdown } from '@/components/trading/OrdersDropdown';
 import { useWalletConnection } from '@/hooks/useWalletConnection';
@@ -60,6 +61,7 @@ export default function Home() {
           <div className="flex flex-col items-end">
             <WalletButton />
             <BalancePanel />
+            <DepositPanel />
             {address && (
               <>
                 <OrdersDrawerToggle

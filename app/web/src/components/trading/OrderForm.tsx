@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAccount, useChainId } from 'wagmi';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TokenPairSelector } from './TokenPairSelector';
@@ -8,6 +8,7 @@ import { OrderTypeToggle } from './OrderTypeToggle';
 import { SlippageInput } from './SlippageInput';
 import { useSubmitTrade } from '@/hooks/useSubmitTrade';
 import { useSessionKey } from '@/hooks/useSessionKey';
+import { useYellowDeposit } from '@/hooks/useYellowDeposit';
 import { validateOrderForm } from '@/utils/validation';
 import { TradingPair } from '@/types/trading';
 import { OrderType } from '@/types/order';
@@ -32,6 +33,16 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
   const chainId = useChainId();
   const { loading, error, success, submitTrade, stepMessage, reset } = useSubmitTrade();
   const { isActive: sessionKeyActive, isLoading: sessionKeyLoading, error: sessionKeyError, retry: retrySessionKey } = useSessionKey();
+  const {
+    balances: unifiedBalances,
+    deposit: yellowDeposit,
+    loading: depositLoading,
+    stepMessage: depositStepMessage,
+    step: depositStep,
+    refreshBalances,
+    reset: resetDeposit,
+    error: depositError,
+  } = useYellowDeposit();
 
   // Form state
   const [tokenPair, setTokenPair] = useState<TradingPair | null>(null);
@@ -42,6 +53,29 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
 
   // Validation errors
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [insufficientBalance, setInsufficientBalance] = useState<{
+    token: string;
+    symbol: string;
+    decimals: number;
+    needed: string;
+    available: string;
+  } | null>(null);
+
+  // Refresh unified balances when session key activates
+  useEffect(() => {
+    if (sessionKeyActive) {
+      refreshBalances();
+    }
+  }, [sessionKeyActive, refreshBalances]);
+
+  // Clear deposit state when deposit completes
+  useEffect(() => {
+    if (depositStep === 'complete') {
+      setInsufficientBalance(null);
+      refreshBalances();
+      resetDeposit();
+    }
+  }, [depositStep, refreshBalances, resetDeposit]);
 
   // Handle successful submission
   useEffect(() => {
@@ -72,6 +106,7 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
 
     // Clear previous errors
     setErrors({});
+    setInsufficientBalance(null);
 
     // Validate form
     const formData = {
@@ -89,8 +124,43 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
       return;
     }
 
-    // Submit trade (sign → deposit → submit → store commitment)
+    // Check unified balance before submitting
+    const isBuy = orderType === 'BUY';
+    const sellToken = isBuy ? tokenPair!.quoteToken : tokenPair!.baseToken;
+    const sellAmount = isBuy
+      ? (parseFloat(amount) * parseFloat(price)).toString()
+      : amount;
+
+    const matchingBalance = unifiedBalances.find(
+      (b) => b.asset.toLowerCase() === sellToken.symbol.toLowerCase()
+    );
+    const available = parseFloat(matchingBalance?.amount || '0');
+
+    if (available < parseFloat(sellAmount)) {
+      setInsufficientBalance({
+        token: sellToken.address,
+        symbol: sellToken.symbol,
+        decimals: sellToken.decimals,
+        needed: sellAmount,
+        available: available.toString(),
+      });
+      return;
+    }
+
+    // Submit trade (commit → submit to matching engine)
     await submitTrade(formData);
+  };
+
+  const handleDepositAndRetry = async () => {
+    if (!insufficientBalance) return;
+    const deficit = (
+      parseFloat(insufficientBalance.needed) - parseFloat(insufficientBalance.available)
+    ).toString();
+    await yellowDeposit(
+      insufficientBalance.token,
+      deficit,
+      insufficientBalance.decimals,
+    );
   };
 
   // Check if form is valid
@@ -241,17 +311,48 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
         )}
       </AnimatePresence>
 
+      {/* Insufficient Balance Warning + Deposit */}
+      <AnimatePresence>
+        {insufficientBalance && (
+          <motion.div
+            initial={{ opacity: 0, y: -5 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -5 }}
+            className="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg"
+          >
+            <p className="text-yellow-400 text-sm mb-2">
+              Insufficient {insufficientBalance.symbol} unified balance.
+              Need {insufficientBalance.needed}, have {insufficientBalance.available}.
+            </p>
+            {depositLoading ? (
+              <p className="text-yellow-300 text-xs animate-pulse">{depositStepMessage}</p>
+            ) : (
+              <button
+                type="button"
+                onClick={handleDepositAndRetry}
+                className="text-sm px-3 py-1.5 rounded-lg bg-yellow-500/20 text-yellow-300 hover:bg-yellow-500/30 transition-colors"
+              >
+                Deposit {(parseFloat(insufficientBalance.needed) - parseFloat(insufficientBalance.available)).toFixed(6)} {insufficientBalance.symbol}
+              </button>
+            )}
+            {depositError && (
+              <p className="text-red-400 text-xs mt-1">{depositError}</p>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Submit Button */}
       <motion.button
         type="submit"
-        disabled={!isFormValid}
-        whileHover={isFormValid ? { scale: 1.02 } : undefined}
-        whileTap={isFormValid ? { scale: 0.98 } : undefined}
+        disabled={!isFormValid || !!insufficientBalance}
+        whileHover={isFormValid && !insufficientBalance ? { scale: 1.02 } : undefined}
+        whileTap={isFormValid && !insufficientBalance ? { scale: 0.98 } : undefined}
         className={`
           w-full py-4 rounded-lg font-semibold text-white text-lg
           transition-all duration-200
           ${
-            isFormValid
+            isFormValid && !insufficientBalance
               ? 'bg-gradient-to-r from-purple-primary to-purple-glow hover:shadow-lg hover:shadow-purple-primary/25'
               : 'bg-gray-600/50 cursor-not-allowed opacity-50'
           }

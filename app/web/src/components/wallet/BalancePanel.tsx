@@ -1,8 +1,11 @@
 'use client';
 
+import { useState, useEffect, useCallback } from 'react';
 import { useAccount } from 'wagmi';
 import { useBalances, type TokenBalance } from '@/hooks/useBalances';
+import { useSessionKey } from '@/hooks/useSessionKey';
 import { WithdrawButton } from './WithdrawButton';
+import { getLedgerBalances, type LedgerBalance } from '@/services/api';
 
 const CUSTODY_ADDRESS = process.env.NEXT_PUBLIC_CUSTODY_ADDRESS || '0x0000000000000000000000000000000000000000';
 
@@ -41,6 +44,24 @@ function BalanceRow({ b, showWithdraw }: { b: TokenBalance; showWithdraw?: boole
 export function BalancePanel() {
   const { address } = useAccount();
   const { custodyBalances, walletBalances, isLoading, refetch } = useBalances();
+  const { isActive: sessionKeyActive } = useSessionKey();
+  const [unifiedBalances, setUnifiedBalances] = useState<LedgerBalance[]>([]);
+
+  const refreshUnified = useCallback(async () => {
+    if (!address || !sessionKeyActive) return;
+    try {
+      const b = await getLedgerBalances(address);
+      setUnifiedBalances(b);
+    } catch {
+      // Silently fail
+    }
+  }, [address, sessionKeyActive]);
+
+  useEffect(() => {
+    refreshUnified();
+    const interval = setInterval(refreshUnified, 30_000);
+    return () => clearInterval(interval);
+  }, [refreshUnified]);
 
   if (!address) return null;
 
@@ -77,6 +98,27 @@ export function BalancePanel() {
           </div>
         )}
       </div>
+
+      {/* Unified Balance (Yellow Network) */}
+      {sessionKeyActive && (
+        <div className="mb-3">
+          <p className="text-[10px] font-medium text-green-400/60 uppercase tracking-wider mb-1.5">
+            Unified (Tradeable)
+          </p>
+          {unifiedBalances.length === 0 ? (
+            <p className="text-xs text-purple-secondary/40">No balance</p>
+          ) : (
+            <div className="space-y-1">
+              {unifiedBalances.map((b) => (
+                <div key={b.asset} className="flex items-center justify-between">
+                  <span className="text-sm text-green-400/80 uppercase">{b.asset}</span>
+                  <span className="text-sm font-mono text-white">{formatBalance(b.amount)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Custody Balances */}
       {hasCustody && (
