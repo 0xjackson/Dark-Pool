@@ -7,6 +7,7 @@ import { TokenPairSelector } from './TokenPairSelector';
 import { OrderTypeToggle } from './OrderTypeToggle';
 import { SlippageInput } from './SlippageInput';
 import { useSubmitTrade } from '@/hooks/useSubmitTrade';
+import { useSessionKey } from '@/hooks/useSessionKey';
 import { validateOrderForm } from '@/utils/validation';
 import { TradingPair } from '@/types/trading';
 import { OrderType } from '@/types/order';
@@ -30,6 +31,7 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
   const { isConnected } = useAccount();
   const chainId = useChainId();
   const { loading, error, success, submitTrade, stepMessage, reset } = useSubmitTrade();
+  const { isActive: sessionKeyActive, isLoading: sessionKeyLoading, error: sessionKeyError, retry: retrySessionKey } = useSessionKey();
 
   // Form state
   const [tokenPair, setTokenPair] = useState<TradingPair | null>(null);
@@ -94,6 +96,7 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
   // Check if form is valid
   const isFormValid =
     isConnected &&
+    sessionKeyActive &&
     tokenPair &&
     amount.trim() !== '' &&
     price.trim() !== '' &&
@@ -283,7 +286,7 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
         )}
       </motion.button>
 
-      {/* Wallet connection warning */}
+      {/* Status warnings */}
       {!isConnected && (
         <motion.p
           initial={{ opacity: 0 }}
@@ -291,6 +294,31 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
           className="text-center text-sm text-gray-400"
         >
           Connect your wallet to submit orders
+        </motion.p>
+      )}
+      {isConnected && sessionKeyLoading && (
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="text-center text-sm text-purple-secondary/70 animate-pulse"
+        >
+          Setting up session key...
+        </motion.p>
+      )}
+      {isConnected && sessionKeyError && (
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="text-center text-sm text-red-400"
+        >
+          {sessionKeyError}{' '}
+          <button
+            type="button"
+            onClick={retrySessionKey}
+            className="underline text-purple-secondary hover:text-white transition-colors"
+          >
+            Try again
+          </button>
         </motion.p>
       )}
     </form>

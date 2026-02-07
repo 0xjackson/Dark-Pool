@@ -1,6 +1,26 @@
 import { OrderRequest, OrderResponse, Order, Match, OrderStatus } from '@/types/order';
 import { ApiError, createApiErrorFromResponse } from '@/utils/errors';
 
+/** Response from POST /api/session-key/create */
+export interface SessionKeyCreateResponse {
+  active: boolean;
+  sessionKeyAddress: string;
+  expiresAt?: string;
+  challengeRaw?: string;
+  eip712?: {
+    domain: Record<string, unknown>;
+    types: Record<string, unknown>;
+    primaryType: string;
+    message: Record<string, unknown>;
+  };
+}
+
+/** Response from POST /api/session-key/activate */
+export interface SessionKeyActivateResponse {
+  success: boolean;
+  expiresAt: string;
+}
+
 /**
  * Get the API base URL from environment variable
  * Defaults to http://localhost:3001 for local development
@@ -262,6 +282,116 @@ export async function fetchOrderById(orderId: string): Promise<Order> {
     }
 
     throw new ApiError('An unexpected error occurred while fetching order', 500, {
+      type: 'unknown',
+      error: String(error),
+    });
+  }
+}
+
+/**
+ * Creates (or retrieves existing) session key for a user
+ * @param userAddress - User's wallet address
+ * @returns Session key creation response with EIP-712 data if signing is needed
+ * @throws ApiError on failure
+ */
+export async function createSessionKey(userAddress: string): Promise<SessionKeyCreateResponse> {
+  const url = `${API_BASE_URL}/api/session-key/create`;
+
+  try {
+    const response = await fetchWithTimeout(
+      url,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ userAddress }),
+      },
+      DEFAULT_TIMEOUT
+    );
+
+    if (!response.ok) {
+      throw await createApiErrorFromResponse(response, 'Failed to create session key');
+    }
+
+    const data: SessionKeyCreateResponse = await response.json();
+    return data;
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+
+    if (error instanceof TimeoutError) {
+      throw new ApiError(error.message, 408, { type: 'timeout' });
+    }
+
+    if (error instanceof TypeError || error instanceof Error) {
+      throw new ApiError(
+        error.message || 'Network request failed',
+        0,
+        { type: 'network', originalError: error.message }
+      );
+    }
+
+    throw new ApiError('An unexpected error occurred while creating session key', 500, {
+      type: 'unknown',
+      error: String(error),
+    });
+  }
+}
+
+/**
+ * Activates a session key after user signs the EIP-712 challenge
+ * @param userAddress - User's wallet address
+ * @param signature - The EIP-712 signature from the wallet
+ * @param challengeRaw - The raw challenge string from /create
+ * @returns Activation response with expiration
+ * @throws ApiError on failure
+ */
+export async function activateSessionKey(
+  userAddress: string,
+  signature: string,
+  challengeRaw: string
+): Promise<SessionKeyActivateResponse> {
+  const url = `${API_BASE_URL}/api/session-key/activate`;
+
+  try {
+    const response = await fetchWithTimeout(
+      url,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ userAddress, signature, challengeRaw }),
+      },
+      DEFAULT_TIMEOUT
+    );
+
+    if (!response.ok) {
+      throw await createApiErrorFromResponse(response, 'Failed to activate session key');
+    }
+
+    const data: SessionKeyActivateResponse = await response.json();
+    return data;
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+
+    if (error instanceof TimeoutError) {
+      throw new ApiError(error.message, 408, { type: 'timeout' });
+    }
+
+    if (error instanceof TypeError || error instanceof Error) {
+      throw new ApiError(
+        error.message || 'Network request failed',
+        0,
+        { type: 'network', originalError: error.message }
+      );
+    }
+
+    throw new ApiError('An unexpected error occurred while activating session key', 500, {
       type: 'unknown',
       error: String(error),
     });

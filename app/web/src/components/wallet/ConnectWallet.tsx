@@ -8,6 +8,7 @@ import { TradeModal } from '@/components/trading/TradeModal';
 import { OrdersDrawer } from '@/components/trading/OrdersDrawer';
 import { OrdersDrawerToggle } from '@/components/trading/OrdersDrawerToggle';
 import { useUserOrders } from '@/hooks/useUserOrders';
+import { useSessionKey } from '@/hooks/useSessionKey';
 
 /**
  * Hero section for center content
@@ -22,7 +23,8 @@ export function ConnectWallet() {
   const { isOpen, openModal, closeModal } = useTradeModal();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const { address } = useAccount();
+  const { address, isConnected } = useAccount();
+  const { status: sessionKeyStatus, isLoading: sessionKeyLoading, error: sessionKeyError, retry: retrySessionKey } = useSessionKey();
 
   // Fetch orders to show pending count on toggle button
   const { orders } = useUserOrders(address, {
@@ -61,6 +63,25 @@ export function ConnectWallet() {
         >
           Trade
         </button>
+        {isConnected && sessionKeyLoading && (
+          <p className="text-sm text-purple-secondary/70 animate-pulse">
+            {sessionKeyStatus === 'creating' && 'Preparing session key...'}
+            {sessionKeyStatus === 'signing' && 'Please sign the session key in your wallet...'}
+            {sessionKeyStatus === 'activating' && 'Activating session key...'}
+          </p>
+        )}
+        {isConnected && sessionKeyError && (
+          <p className="text-sm text-red-400">
+            {sessionKeyError}{' '}
+            <button
+              type="button"
+              onClick={retrySessionKey}
+              className="underline text-purple-secondary hover:text-white transition-colors"
+            >
+              Try again
+            </button>
+          </p>
+        )}
         <TradeModal
           isOpen={isOpen}
           onClose={closeModal}

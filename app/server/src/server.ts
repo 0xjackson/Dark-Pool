@@ -3,8 +3,11 @@ import { createServer } from 'http';
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
 import ordersRouter, { setDatabase } from './routes/orders';
+import sessionKeysRouter, { setSessionKeysDatabase } from './routes/sessionKeys';
 import DarkPoolWebSocketServer from './websocket/server';
 import { getWarlockClient } from './services/warlockClient';
+import { initEngineConnection } from './services/yellowConnection';
+import { startSettlementWorker, stopSettlementWorker } from './services/settlementWorker';
 
 // Load environment variables
 dotenv.config();
@@ -40,6 +43,7 @@ db.query('SELECT NOW()', (err: Error | null, res: any) => {
 
 // Set database for routes
 setDatabase(db);
+setSessionKeysDatabase(db);
 
 // Middleware
 app.use(express.json());
@@ -83,6 +87,7 @@ app.get('/health', async (req, res) => {
 
 // API Routes
 app.use('/api/orders', ordersRouter);
+app.use('/api/session-key', sessionKeysRouter);
 
 
 // Initialize WebSocket server
@@ -92,6 +97,17 @@ const wsServer = new DarkPoolWebSocketServer(server);
 app.get('/api/ws/stats', (req, res) => {
   res.json(wsServer.getStats());
 });
+
+// Initialize Yellow Network connection and settlement worker
+(async () => {
+  try {
+    await initEngineConnection(db);
+    startSettlementWorker(db, wsServer);
+  } catch (err) {
+    console.error('Failed to initialize Yellow Network connection:', err);
+    // Server still runs — settlement will be retried when connection recovers
+  }
+})();
 
 // Start server
 server.listen(PORT, () => {
@@ -104,6 +120,7 @@ server.listen(PORT, () => {
 // Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down gracefully...');
+  stopSettlementWorker();
   server.close(() => {
     wsServer.shutdown();
     db.end(() => {
@@ -115,6 +132,7 @@ process.on('SIGTERM', () => {
 
 process.on('SIGINT', () => {
   console.log('SIGINT received, shutting down gracefully...');
+  stopSettlementWorker();
   server.close(() => {
     wsServer.shutdown();
     db.end(() => {
