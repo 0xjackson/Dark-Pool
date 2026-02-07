@@ -111,7 +111,31 @@ async function settleMatch(match: any): Promise<void> {
   const sellerOrder = await loadOrderDetails(match.sell_order_id);
   const buyerOrder = await loadOrderDetails(match.buy_order_id);
 
-  // STEP 4: Generate ZK proof
+  // STEP 4: Read on-chain settledAmount for both orders (needed as ZK public inputs)
+  let sellerSettledSoFar = '0';
+  let buyerSettledSoFar = '0';
+
+  if (ROUTER_ADDRESS) {
+    const publicClient = getPublicClient();
+
+    const sellerCommitment = await publicClient.readContract({
+      address: ROUTER_ADDRESS,
+      abi: ROUTER_ABI,
+      functionName: 'commitments',
+      args: [sellerOrder.order_id as Hex],
+    });
+    sellerSettledSoFar = (sellerCommitment as any)[3].toString();
+
+    const buyerCommitment = await publicClient.readContract({
+      address: ROUTER_ADDRESS,
+      abi: ROUTER_ABI,
+      functionName: 'commitments',
+      args: [buyerOrder.order_id as Hex],
+    });
+    buyerSettledSoFar = (buyerCommitment as any)[3].toString();
+  }
+
+  // STEP 5: Generate ZK proof
   console.log(`Match ${match.id}: generating ZK proof...`);
   const proof = await generateSettlementProof(
     {
@@ -136,13 +160,13 @@ async function settleMatch(match: any): Promise<void> {
     buyerOrder.commitment_hash,
     match.quantity,      // sellerFillAmount
     quoteAmount,         // buyerFillAmount
-    '0',                 // sellerSettledSoFar (TODO: read from on-chain or track in DB)
-    '0',                 // buyerSettledSoFar
+    sellerSettledSoFar,
+    buyerSettledSoFar,
     Math.floor(Date.now() / 1000),
   );
   console.log(`Match ${match.id}: ZK proof generated`);
 
-  // STEP 5: Call proveAndSettle on-chain
+  // STEP 6: Call proveAndSettle on-chain
   if (ROUTER_ADDRESS) {
     const walletClient = getEngineWalletClient();
     const publicClient = getPublicClient();
@@ -175,7 +199,7 @@ async function settleMatch(match: any): Promise<void> {
     console.warn(`Match ${match.id}: ROUTER_ADDRESS not set, skipping on-chain settlement`);
   }
 
-  // STEP 6: Create app session on Yellow
+  // STEP 7: Create app session on Yellow
   const appSessionId = await createAppSession(
     sellerKey.private_key as Hex,
     buyerKey.private_key as Hex,
@@ -195,7 +219,7 @@ async function settleMatch(match: any): Promise<void> {
 
   console.log(`Match ${match.id}: app session created ${appSessionId}`);
 
-  // STEP 7: Close app session (THE SWAP — redistribute funds)
+  // STEP 8: Close app session (THE SWAP — redistribute funds)
   await closeAppSession(appSessionId as Hex, [
     { participant: seller, asset: quoteSymbol, amount: quoteAmount }, // seller GETS quote
     { participant: buyer, asset: baseSymbol, amount: match.quantity }, // buyer GETS base
@@ -203,7 +227,7 @@ async function settleMatch(match: any): Promise<void> {
     { participant: engineAddress, asset: quoteSymbol, amount: '0' },
   ]);
 
-  // STEP 8: Check if orders fully filled → call markFullySettled
+  // STEP 9: Check if orders fully filled → call markFullySettled
   if (ROUTER_ADDRESS) {
     const walletClient = getEngineWalletClient();
 
@@ -244,7 +268,7 @@ async function settleMatch(match: any): Promise<void> {
 
   console.log(`Match ${match.id}: SETTLED`);
 
-  // STEP 9: Notify via WebSocket
+  // STEP 10: Notify via WebSocket
   if (wsServer) {
     const notification = {
       type: 'settlement',
