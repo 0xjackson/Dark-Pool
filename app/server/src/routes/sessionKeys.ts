@@ -65,7 +65,10 @@ router.post('/create', async (req: Request, res: Response) => {
     const sk = generateSessionKey();
     const expiresAt = BigInt(Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60); // +30 days
     const expiresAtDate = new Date(Number(expiresAt) * 1000);
-    const userAllowances = allowances || [{ asset: 'ytest.usd', amount: '10000' }];
+    const userAllowances = allowances || [
+      { asset: 'usdc', amount: '10000' },
+      { asset: 'eth', amount: '10' },
+    ];
 
     // Open WS to Yellow and get challenge for user to sign
     const { challengeRaw, eip712 } = await authenticateUserWs(
