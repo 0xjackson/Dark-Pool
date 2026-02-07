@@ -5,50 +5,188 @@ Private P2P trading protocol built on [Yellow Network](https://yellow.org). Orde
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                                                                                 │
-│  ┌─────────────┐  POST /orders            ┌──────────────┐  SubmitOrder()      │
-│  │   Portal    │  POST /session-key/*     │    Engine    │  StreamMatches()    │
-│  │  (Next.js)  │────────────────────────►│  (Node.js)   │─────────────────┐   │
-│  │             │◄────────────────────────│              │◄────────────────┐│   │
-│  │  wagmi      │  WS: match, settlement   │  snarkjs     │  gRPC           ││   │
-│  │  RainbowKit │  WS: order_update        │  ethers.js   │                 ▼│   │
-│  └──────┬──────┘                          └──┬───┬───┬──┘          ┌──────────┐│
-│         │                                    │   │   │             │  Warlock ││
-│         │                                    │   │   │             │(Go/gRPC) ││
-│         │                                    │   │   │             │          ││
-│         │                                    │   │   │             │price-time││
-│         │                                    │   │   │             │ priority ││
-│         │                                    │   │   │             └────┬─────┘│
-│         │                                    │   │   │                  │      │
-│         │                                    │   │   │                  ▼      │
-│         │                                    │   │   │           ┌──────────┐  │
-│         │                                    │   │   │           │ Postgres │  │
-│         │                                    │   │   │           │          │  │
-│         │                                    │   │   │           │ orders   │  │
-│         │                                    │   │   │           │ matches  │  │
-│         │                                    │   │   │           │ sessions │  │
-│         │                                    │   │   │           └──────────┘  │
-│         │                                    │   │   │                         │
-│         │              proveAndSettle()  ─────┘   │   └─────  auth_request()   │
-│         │              markFullySettled() ────┐   │   ┌─────  auth_verify()    │
-│         │              generateProof()        │   │   │       create_app_ses() │
-│         │                                    │   │   │       close_app_ses()   │
-│         │                                    │   │   │       get_assets()      │
-│         │                                    ▼   │   ▼                         │
-│         │  approve()                ┌───────────┐│┌───────────┐               │
-│         │  depositAndCommit()       │  Router   │││  Yellow   │               │
-│         └──────────────────────────►│ Contract  │││ Network   │               │
-│                                     │           │││           │               │
-│                                     │ Poseidon  │││ Custody   │               │
-│                                     │ Groth16   │││ Clearnet  │               │
-│                                     │ Verifier  │││ Sessions  │               │
-│                                     └───────────┘│└───────────┘               │
-│                                                  │                             │
-│                                                  │                             │
-│                          EVM Chain ──────────────┘                             │
-│                                                                                 │
-└─────────────────────────────────────────────────────────────────────────────────┘
+  POST /orders                SubmitOrder()
+  POST /session-key/*         StreamMatches()
+  GET /orderbook              (gRPC)
+┌──────────────┐            ┌──────────────┐            ┌──────────────┐
+│    Portal    │───────────►│    Engine    │───────────►│   Warlock    │
+│  (Next.js)   │◄───────────│  (Node.js)   │◄───────────│  (Go/gRPC)   │
+│              │            │              │            │              │
+│  wagmi       │  WS:match  │  snarkjs     │  match     │  price-time  │
+│  RainbowKit  │  WS:settle │  ethers.js   │  events    │  priority    │
+│  Poseidon    │  WS:update │  proofGen    │            │  partial fills│
+└──────┬───────┘            └──┬────┬──────┘            └──────┬───────┘
+       │                       │    │                          │
+       │                       │    │ auth_request()           │
+       │                       │    │ auth_verify()            │
+       │                       │    │ create_app_session()     │
+       │                       │    │ close_app_session()      │
+       │                       │    │ get_assets()             │
+       │                       │    │                          │
+       │  approve()            │    │                          │
+       │  depositAndCommit()   │    ▼                          ▼
+       │                       │  ┌──────────────┐   ┌──────────────┐
+       │                       │  │Yellow Network│   │  PostgreSQL  │
+       │                       │  │              │   │              │
+       │                       │  │  Custody     │   │  orders      │
+       │                       │  │  Clearnet    │   │  matches     │
+       │                       │  │  App Sessions│   │  session_keys│
+       │                       │  │  Unified Bal.│   │              │
+       │                       │  └──────────────┘   └──────────────┘
+       │                       │
+       │  proveAndSettle()     │
+       │  markFullySettled()   │
+       ▼                       ▼
+┌─────────────────────────────────────┐
+│          DarkPoolRouter.sol         │
+│                                     │
+│  Poseidon T4/T6    Groth16Verifier  │
+│  Commitment Store  Partial Fills    │
+│                                     │
+│          Yellow Custody             │
+└─────────────────────────────────────┘
+```
+
+## Call Flow
+
+```
+User          Portal         Engine         Warlock       Postgres        Router         Yellow
+  |              |              |              |              |              |              |
+  |              |              |              |              |              |              |
+  |== SESSION INITIALIZATION ===============================================================|
+  |              |              |              |              |              |              |
+  | connect wallet              |              |              |              |              |
+  |------------->|              |              |              |              |              |
+  |              |              |              |              |              |              |
+  |              | POST /session-key/create    |              |              |              |
+  |              |------------->|              |              |              |              |
+  |              |              |              |              |              |              |
+  |              |              | gen ECDSA keypair           |              |              |
+  |              |              |              |              |              |              |
+  |              |              | store key (PENDING)         |              |              |
+  |              |              |---------------------------->|              |              |
+  |              |              |              |              |              |              |
+  |              |              | auth_request()              |              |              |
+  |              |              |---------------------------------------------------------->|
+  |              |              |              |              |          EIP-712 challenge  |
+  |              |              |<----------------------------------------------------------|
+  |              |              |              |              |              |              |
+  |              |   challenge  |              |              |              |              |
+  |              |<-------------|              |              |              |              |
+  |   sign this  |              |              |              |              |              |
+  |<-------------|              |              |              |              |              |
+  | signature    |              |              |              |              |              |
+  |------------->|              |              |              |              |              |
+  |              |              |              |              |              |              |
+  |              | POST /session-key/activate  |              |              |              |
+  |              |------------->|              |              |              |              |
+  |              |              |              |              |              |              |
+  |              |              | auth_verify(sig)            |              |              |
+  |              |              |---------------------------------------------------------->|
+  |              |              |              |              |              authenticated  |
+  |              |              |<----------------------------------------------------------|
+  |              |              |              |              |              |              |
+  |              |              | key -> ACTIVE|              |              |              |
+  |              |              |---------------------------->|              |              |
+  |              |              |              |              |              |              |
+  |              |       ready  |              |              |              |              |
+  |              |<-------------|              |              |              |              |
+  |              |              |              |              |              |              |
+  |              |              |              |              |              |              |
+  |== ORDER SUBMISSION =====================================================================|
+  |              |              |              |              |              |              |
+  | create order |              |              |              |              |              |
+  |------------->|              |              |              |              |              |
+  |              |              |              |              |              |              |
+  |              | compute Poseidon hash (T6 -> T4)           |              |              |
+  |              |              |              |              |              |              |
+  |              | approve(token, amount)      |              |              |              |
+  |              |---------------------------------------------------------->|              |
+  |              |              |              |              |   confirmed  |              |
+  |              |<----------------------------------------------------------|              |
+  |              |              |              |              |              |              |
+  |              | depositAndCommit(token, amt, orderId, hash)|              |              |
+  |              |---------------------------------------------------------->|              |
+  |              |              |              |              |   committed  |              |
+  |              |<----------------------------------------------------------|              |
+  |              |              |              |              |              |              |
+  |              | POST /orders |              |              |              |              |
+  |              |------------->|              |              |              |              |
+  |              |              |              |              |              |              |
+  |              |              | SubmitOrder() gRPC          |              |              |
+  |              |              |------------->|              |              |              |
+  |              |              |              |              |              |              |
+  |              |              |              | price-time match            |              |
+  |              |              |              |              |              |              |
+  |              |              |              | INSERT order |              |              |
+  |              |              |              |------------->|              |              |
+  |              |              |              |              |              |              |
+  |              |              |     orderId  |              |              |              |
+  |              |              |<-------------|              |              |              |
+  |              |   confirmed  |              |              |              |              |
+  |              |<-------------|              |              |              |              |
+  |              |              |              |              |              |              |
+  |              |              |              |              |              |              |
+  |== MATCHING (async) =====================================================================|
+  |              |              |              |              |              |              |
+  |              |              | StreamMatches() gRPC        |              |              |
+  |              |              |<-------------|              |              |              |
+  |              |              |              |              |              |              |
+  |              |              | store match (PENDING)       |              |              |
+  |              |              |---------------------------->|              |              |
+  |              |              |              |              |              |              |
+  |              |   WS: match  |              |              |              |              |
+  |              |<-------------|              |              |              |              |
+  |       match  |              |              |              |              |              |
+  |<-------------|              |              |              |              |              |
+  |              |              |              |              |              |              |
+  |              |              |              |              |              |              |
+  |== SETTLEMENT ===========================================================================|
+  |              |              |              |              |              |              |
+  |              |              | poll pending matches (2s)   |              |              |
+  |              |              |              |              |              |              |
+  |              |              | claim match (SETTLING)      |              |              |
+  |              |              |---------------------------->|              |              |
+  |              |              |              |              |              |              |
+  |              |              | load orders + keys          |              |              |
+  |              |              |---------------------------->|              |              |
+  |              |              |              |              |              |              |
+  |              |              | commitments() view          |              |              |
+  |              |              |------------------------------------------->|              |
+  |              |              |              |              settledAmount  |              |
+  |              |              |<-------------------------------------------|              |
+  |              |              |              |              |              |              |
+  |              |              | generateProof() snarkjs     |              |              |
+  |              |              | ~200ms, 4576 constraints    |              |              |
+  |              |              |              |              |              |              |
+  |              |              | proveAndSettle(proof, amounts)             |              |
+  |              |              |------------------------------------------->|              |
+  |              |              |              |              |              | verify Groth16 proof
+  |              |              |              |              |              | update settledAmount
+  |              |              |              |              |    verified  |              |
+  |              |              |<-------------------------------------------|              |
+  |              |              |              |              |              |              |
+  |              |              | create_app_session(seller + buyer sigs)    |              |
+  |              |              |---------------------------------------------------------->|
+  |              |              |              |              |              |  session id  |
+  |              |              |<----------------------------------------------------------|
+  |              |              |              |              |              |              |
+  |              |              | close_app_session(swapped allocations)     |              |
+  |              |              |---------------------------------------------------------->|
+  |              |              |              |              |              |      closed  |
+  |              |              |<----------------------------------------------------------|
+  |              |              |              |              |              |              |
+  |              |              | markFullySettled(orderId)   |              |              |
+  |              |              |------------------------------------------->|              |
+  |              |              |              |              |              |              |
+  |              |              | match -> SETTLED            |              |              |
+  |              |              |---------------------------->|              |              |
+  |              |              |              |              |              |              |
+  |              | WS: settlement              |              |              |              |
+  |              |<-------------|              |              |              |              |
+  |     settled  |              |              |              |              |              |
+  |<-------------|              |              |              |              |              |
+  |              |              |              |              |              |              |
 ```
 
 **Portal** handles wallet connection and order submission via RainbowKit and wagmi. Users call `approve()` and `depositAndCommit()` directly on-chain, which deposits collateral into Yellow Network Custody and stores a Poseidon hash commitment. The frontend computes the nested Poseidon hash locally (`PoseidonT6` into `PoseidonT4`) and submits order details to the Engine over REST.
