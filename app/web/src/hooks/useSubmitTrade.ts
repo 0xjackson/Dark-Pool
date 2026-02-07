@@ -103,6 +103,12 @@ export function useSubmitTrade(): UseSubmitTradeReturn {
         );
 
         // Check if user has sufficient Custody balance for commitOnly
+        // Custody contract uses address(0) for native ETH, not the 0xEeee... sentinel
+        const NATIVE_SENTINEL = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'.toLowerCase();
+        const custodyQueryToken = sellToken.toLowerCase() === NATIVE_SENTINEL
+          ? '0x0000000000000000000000000000000000000000' as `0x${string}`
+          : sellToken;
+
         let useCustodyBalance = false;
         if (CUSTODY_ADDRESS !== '0x0000000000000000000000000000000000000000') {
           try {
@@ -110,7 +116,7 @@ export function useSubmitTrade(): UseSubmitTradeReturn {
               address: CUSTODY_ADDRESS,
               abi: CUSTODY_ABI,
               functionName: 'getAccountsBalances',
-              args: [[address], [sellToken]],
+              args: [[address], [custodyQueryToken]],
             });
             const custodyBalance = (balances as bigint[][])?.[0]?.[0] ?? 0n;
             useCustodyBalance = custodyBalance >= sellAmount;
