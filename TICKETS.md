@@ -144,13 +144,15 @@ Circom + Groth16 + Poseidon stack. Enables settlement without revealing order de
 Switch commitment hash from keccak256 to Poseidon across all layers.
 
 ### PH-001: Add Poseidon hash to frontend
-- **File:** `app/web/package.json`, `app/web/src/hooks/useSubmitTrade.ts`
-- **Change:** Install `circomlibjs`. Replace `keccak256(encodeAbiParameters(...))` with `poseidon([orderId, user, sellToken, buyToken, sellAmount, minBuyAmount, expiresAt])` in the order hash computation. Ensure output is formatted as `bytes32` for contract.
+- **File:** `app/web/src/hooks/useSubmitTrade.ts`
+- **Change:** Replace `keccak256(encodeAbiParameters(...))` with Poseidon hash using shared utility from PH-004. Mask orderId to 253 bits for BN128 field compatibility (`BigInt(raw) & ((1n << 253n) - 1n)`). Ensure output is formatted as `bytes32` for contract.
+- **Blocked by:** PH-004, INF-005
 - **Blocks:** PH-003
 
 ### PH-002: Add Poseidon hash to backend commitment verifier
-- **File:** `app/server/package.json`, `app/server/src/services/commitmentVerifier.ts`
-- **Change:** Install `circomlibjs`. Replace keccak256 hash computation with Poseidon. The anti-poisoning check now computes `poseidon(orderDetails)` and compares against on-chain `commitment.orderHash`.
+- **File:** `app/server/src/services/commitmentVerifier.ts`
+- **Change:** Replace keccak256 hash computation with Poseidon using shared utility from PH-004. The anti-poisoning check now computes `poseidon(orderDetails)` and compares against on-chain `commitment.orderHash`.
+- **Blocked by:** PH-004, INF-004
 - **Blocks:** PH-003
 
 ### PH-003: Backend proof generation service
@@ -161,8 +163,26 @@ Switch commitment hash from keccak256 to Poseidon across all layers.
 
 ### PH-004: Poseidon hash utility module
 - **File:** `app/server/src/utils/poseidon.ts` (new), `app/web/src/utils/poseidon.ts` (new)
-- **Change:** Shared utility that initializes Poseidon hasher from `circomlibjs`, exposes `computeOrderHash(orderId, user, sellToken, buyToken, sellAmount, minBuyAmount, expiresAt) → bytes32`. Used by both frontend and backend.
+- **Change:** Shared utility that initializes Poseidon hasher from `circomlibjs`, exposes `computeOrderHash(orderId, user, sellToken, buyToken, sellAmount, minBuyAmount, expiresAt) → bytes32`. Handles Poseidon field element → bytes32 conversion (`poseidon.F.toString(hash, 16).padStart(64, '0')`). Used by both frontend and backend.
+- **Blocked by:** INF-004, INF-005
 - **Blocks:** PH-001, PH-002
+
+### PH-005: Install poseidon-solidity in contracts
+- **File:** `contracts/foundry.toml`, `contracts/src/DarkPoolRouter.sol`
+- **Change:** `forge install poseidon-solidity/poseidon-solidity`. Add remapping to `foundry.toml`. Import `PoseidonT8` in DarkPoolRouter. This is needed for on-chain Poseidon hash verification in `revealAndSettle` fallback path. Battle-tested library (Tornado Cash, Semaphore, WorldID). ~100k gas per hash.
+- **Blocks:** PH-006
+
+### PH-006: Update revealAndSettle to use on-chain Poseidon
+- **File:** `contracts/src/DarkPoolRouter.sol`
+- **Change:** Replace `keccak256(abi.encode(seller))` with `PoseidonT8.hash([uint256(seller.orderId), uint256(uint160(seller.user)), ...])` in `revealAndSettle`. Both settlement paths now verify against the same Poseidon commitment hash. Add `SNARK_SCALAR_FIELD` constant and field bounds checks in `depositAndCommit`.
+- **Blocked by:** PH-005, PF-003
+- **Blocks:** T-001
+
+### PH-007: orderId field bounds — 253-bit masking
+- **File:** `app/web/src/hooks/useSubmitTrade.ts`, `app/web/src/utils/poseidon.ts`
+- **Change:** Mask orderId to 253 bits after keccak256 generation: `BigInt(raw) & ((1n << 253n) - 1n)`. This ensures orderId < SNARK_SCALAR_FIELD (~2^254), which is required by the snarkjs Groth16 verifier. 253-bit IDs still give ~10^76 unique values.
+- **Blocked by:** PH-004
+- **Blocks:** PH-001
 
 ---
 
@@ -288,9 +308,15 @@ The core settlement pipeline — picks up matches, settles via ZK + Yellow.
 
 ### S-003: Settlement worker — match consumer
 - **File:** `app/server/src/services/settlementWorker.ts` (new)
-- **Change:** Polls DB for `settlement_status = 'PENDING'` matches. For each: load both users' session keys (SK-004), generate ZK proof (PH-003), call `proveAndSettle` on-chain (engine wallet signs tx), update match status to SETTLING.
-- **Blocked by:** S-002, SK-004, PH-003, ZK-005
+- **Change:** Polls DB for `settlement_status = 'PENDING'` matches. For each: load both users' session keys (SK-004), generate ZK proof (PH-003), call `proveAndSettle` on-chain (engine wallet signs tx), update match status to SETTLING. Falls back to `revealAndSettle` if proof generation fails (see S-003b).
+- **Blocked by:** S-002, SK-004, PH-003, ZK-005, DB-002, S-009
 - **Blocks:** S-004
+
+### S-003b: Settlement worker — revealAndSettle fallback path
+- **File:** `app/server/src/services/settlementWorker.ts`
+- **Change:** If `proveAndSettle` fails due to proof generation error, fall back to `revealAndSettle` with full order details as calldata. Load OrderDetails from DB, construct calldata, submit via engine wallet. Log that fallback was used. This allows settlement testing before ZK circuits are ready, and provides a production fallback if proof generation fails.
+- **Blocked by:** S-003, PF-003
+- **Blocks:** S-007
 
 ### S-004: Settlement pipeline — App Session create
 - **File:** `app/server/src/services/settlementWorker.ts`
@@ -327,7 +353,7 @@ The core settlement pipeline — picks up matches, settles via ZK + Yellow.
 ### S-010: Install Nitrolite SDK in backend
 - **File:** `app/server/package.json`
 - **Change:** `npm install @erc7824/nitrolite viem`. Verify SDK functions are importable and types work.
-- **Blocks:** S-002
+- **Blocks:** S-001, S-002
 
 ---
 
@@ -473,13 +499,11 @@ Deploy to multiple chains and enable cross-chain settlement via Yellow unified b
 - **Change:** Search for any references to `order_signature`, `order_data`, `revealed`, `revealed_at`. Remove from API request/response types, validation, DB queries.
 - **Blocked by:** DB-003
 
-### CL-002: Fix OrdersDrawer unreachable portal code
-- **File:** `app/web/src/components/trading/OrdersDrawer.tsx`
-- **Change:** Component returns before `createPortal` call. Either move the portal before the return or remove the dead code.
-
-### CL-003: Remove 50ms sleep hack in gRPC server
+### CL-002: Remove 50ms sleep hack in gRPC server
 - **File:** `warlock/internal/grpc/server.go`
 - **Change:** Investigate and fix the root cause of cross-connection visibility issue. Remove the `time.Sleep(50 * time.Millisecond)` hack.
+
+**Note:** OrdersDrawer portal code (`typeof window === 'undefined'` guard before `createPortal`) is correct — it's a standard Next.js SSR pattern, NOT a bug.
 
 ---
 
@@ -490,14 +514,14 @@ Deploy to multiple chains and enable cross-chain settlement via Yellow unified b
 | 1: Contract Foundation | C-001 → C-004 | IYellowCustody 3-param deposit, mock, tests |
 | 1b: Partial Fills | PF-001 → PF-010 | settledAmount, proportional slippage, per-order settle |
 | 1c: ZK Settlement | ZK-001 → ZK-008 | Circom circuit, Groth16 verifier, proveAndSettle |
-| 1d: Poseidon Hash | PH-001 → PH-004 | Frontend + backend Poseidon, proof generation service |
+| 1d: Poseidon Hash | PH-001 → PH-007 | Frontend + backend Poseidon, on-chain Poseidon, orderId bounds, proof gen |
 | 2: Database | DB-001 → DB-005 | session_keys table, settlement columns, cleanup |
 | 3: Session Keys | SK-001 → SK-006 | Generation, encryption, confirmation, retrieval |
 | 4: Frontend | FE-001 → FE-006 | Session key auth, Poseidon, balance, withdrawal |
-| 5: Settlement | S-001 → S-010 | Yellow WS, engine auth, settlement pipeline |
+| 5: Settlement | S-001 → S-010, S-003b | Yellow WS, engine auth, settlement pipeline, revealAndSettle fallback |
 | 6: Testing | T-001 → T-010 | Contract, backend, E2E, edge cases |
 | 7: Cross-Chain | CC-001 → CC-009 | Multi-chain deploy, routing, frontend |
 | Infra | INF-001 → INF-005 | Env vars, Docker, circuit build |
-| Cleanup | CL-001 → CL-003 | Dead code, stale columns, hacks |
+| Cleanup | CL-001 → CL-002 | Dead code, stale columns, hacks |
 
-**Total: 70 tickets across 12 sections.**
+**Total: 74 tickets across 12 sections.**

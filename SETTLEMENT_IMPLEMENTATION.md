@@ -116,9 +116,18 @@ Source reference: `.reference/nitrolite/sdk/src/abis/generated.ts` — confirmed
 ### depositAndCommit
 
 ```solidity
-// contracts/src/DarkPoolRouter.sol:75-90
+// contracts/src/DarkPoolRouter.sol
+uint256 constant SNARK_SCALAR_FIELD =
+    21888242871839275222246405745257275088548364400416034343698204186575808495617;
+
 function depositAndCommit(address token, uint256 depositAmount, bytes32 orderId, bytes32 orderHash) external {
     require(commitments[orderId].status == Status.None, "Order exists");
+
+    // Defensive: ensure orderId and orderHash fit in BN128 scalar field for ZK compatibility.
+    // Poseidon hashes are field elements by construction. orderId must be masked to 253 bits
+    // by the frontend. Practical amounts (< 2^128) always fit.
+    require(uint256(orderId) < SNARK_SCALAR_FIELD, "orderId exceeds field");
+    require(uint256(orderHash) < SNARK_SCALAR_FIELD, "orderHash exceeds field");
 
     IERC20(token).safeTransferFrom(msg.sender, address(this), depositAmount);
 
@@ -126,7 +135,7 @@ function depositAndCommit(address token, uint256 depositAmount, bytes32 orderId,
     custody.deposit(msg.sender, token, depositAmount);  // credits USER's balance
 
     commitments[orderId] =
-        Commitment({user: msg.sender, orderHash: orderHash, timestamp: block.timestamp, status: Status.Active});
+        Commitment({user: msg.sender, orderHash: orderHash, timestamp: block.timestamp, settledAmount: 0, status: Status.Active});
 
     emit OrderCommitted(orderId, msg.sender, orderHash);
 }
@@ -197,21 +206,60 @@ Yellow App Sessions don't support partial close. Each partial fill creates a sep
 | JS prover | **snarkjs** | Native Node.js, no external binary needed |
 | Solidity verifier | **Auto-generated** | `snarkjs generateverifier` outputs a Solidity contract |
 | Frontend hash | **circomlibjs** | Poseidon computation in JS, same BN128 field |
-| On-chain hash | **poseidon-solidity** | Poseidon computation in Solidity (for `commitmentVerifier`) |
+| On-chain hash | **poseidon-solidity** | Poseidon computation in Solidity (for `revealAndSettle` fallback verification) |
 
 ### Commitment Hash: keccak256 → Poseidon
 
 Poseidon is a hash designed for ZK circuits — ~250 constraints vs keccak256's ~150,000. Same cryptographic security.
 
 ```
-// Current
+// Current (to be replaced)
 orderHash = keccak256(abi.encode(orderId, user, sellToken, buyToken, sellAmount, minBuyAmount, expiresAt))
 
-// With ZK
+// Production (Poseidon everywhere)
 orderHash = poseidon(orderId, user, sellToken, buyToken, sellAmount, minBuyAmount, expiresAt)
 ```
 
-**The contract's `depositAndCommit` doesn't change** — it stores a `bytes32` hash without computing it. The hash function change is in the frontend (order submission) and backend (commitment verification).
+**The contract's `depositAndCommit` doesn't change** — it stores a `bytes32` hash without computing it. The hash function change is in the frontend (order submission), backend (commitment verification), and `revealAndSettle` on-chain verification (uses `poseidon-solidity` library).
+
+### BN128 Field Bounds
+
+Poseidon and Groth16 operate over the BN128 scalar field (~254 bits):
+
+```
+SNARK_SCALAR_FIELD = 21888242871839275222246405745257275088548364400416034343698204186575808495617 ≈ 2^254
+```
+
+All circuit inputs must be less than this value. This is naturally satisfied:
+
+- **Poseidon hash outputs** — always field elements, always < `SNARK_SCALAR_FIELD` by construction
+- **ERC-20 amounts** — practically < 2^128 (even USDT total supply is ~2^100)
+- **Addresses** — 160 bits, always fits
+- **Timestamps** — ~32 bits, always fits
+
+**One value needs explicit handling:** `orderId` is currently generated via `keccak256(...)` which produces a full 256-bit value (~50% chance of exceeding the field). The snarkjs-generated verifier **rejects** inputs >= `SNARK_SCALAR_FIELD`.
+
+**Fix:** Mask orderId to 253 bits (always < field modulus, still ~10^76 unique IDs):
+
+```typescript
+const raw = keccak256(encodeAbiParameters([...], [address, timestamp, nonce]));
+const orderId = BigInt(raw) & ((1n << 253n) - 1n);  // always < SNARK_SCALAR_FIELD
+```
+
+The contract adds a defensive `require` for belt-and-suspenders safety (see `depositAndCommit` below).
+
+### Poseidon Output → bytes32 Conversion
+
+Poseidon produces a field element (~254 bits), stored as `bytes32` with the top 2 bits always zero. Canonical conversion:
+
+```typescript
+// Frontend/Backend (circomlibjs)
+const poseidon = await buildPoseidon();
+const hash = poseidon([orderId, user, sellToken, buyToken, sellAmount, minBuyAmount, expiresAt]);
+const orderHash = '0x' + poseidon.F.toString(hash, 16).padStart(64, '0');  // bytes32
+```
+
+No special handling needed — `bytes32` can store 254-bit values. The hash just happens to never use the full 256-bit range.
 
 ### The ZK Circuit
 
@@ -244,6 +292,9 @@ Circuit size: ~5,000–10,000 constraints. Proof generation: <1 second. On-chain
 ### Contract: `proveAndSettle`
 
 ```solidity
+uint256 constant SNARK_SCALAR_FIELD =
+    21888242871839275222246405745257275088548364400416034343698204186575808495617;
+
 function proveAndSettle(
     bytes32 sellerOrderId,
     bytes32 buyerOrderId,
@@ -259,10 +310,14 @@ function proveAndSettle(
     require(sellerC.status == Status.Active, "Seller not active");
     require(buyerC.status == Status.Active, "Buyer not active");
 
-    // Verify ZK proof — replaces hash check, slippage check, expiry check, token match
+    // All public inputs must be < SNARK_SCALAR_FIELD for Groth16 verification.
+    // Poseidon hashes are field elements (always < field by construction).
+    // Practical ERC-20 amounts are always < 2^128, well within the field.
+    // block.timestamp is ~32 bits, always fits.
+    // The snarkjs-generated verifier also checks this, but we guard here for clarity.
     uint256[] memory publicInputs = new uint256[](7);
-    publicInputs[0] = uint256(sellerC.orderHash);
-    publicInputs[1] = uint256(buyerC.orderHash);
+    publicInputs[0] = uint256(sellerC.orderHash);   // Poseidon output, always < field
+    publicInputs[1] = uint256(buyerC.orderHash);    // Poseidon output, always < field
     publicInputs[2] = sellerFillAmount;
     publicInputs[3] = buyerFillAmount;
     publicInputs[4] = sellerC.settledAmount;
@@ -280,6 +335,8 @@ function proveAndSettle(
 
 No OrderDetails in calldata. No reveal. Order details stay private through the entire fill lifecycle.
 
+**Why no limb splitting is needed:** Poseidon hashes are field elements (~254 bits), always < `SNARK_SCALAR_FIELD`. Practical ERC-20 amounts are < 2^128. Timestamps are tiny. All values naturally fit in the BN128 scalar field. The contract adds a defensive `require(uint256(orderHash) < SNARK_SCALAR_FIELD)` in `depositAndCommit` for belt-and-suspenders safety (see above).
+
 ### What's Visible vs Hidden On-Chain
 
 | | Without ZK | With ZK |
@@ -296,6 +353,22 @@ No OrderDetails in calldata. No reveal. Order details stay private through the e
 Both functions coexist:
 - `proveAndSettle` — private settlement with ZK proof (production path)
 - `revealAndSettle` — non-private fallback for debugging, testing, or if ZK proof generation fails
+
+**Critical:** `revealAndSettle` recomputes the commitment hash on-chain to verify order details. Since commitments are now Poseidon hashes, this requires the `poseidon-solidity` library (`forge install poseidon-solidity/poseidon-solidity`). The fallback verifies:
+
+```solidity
+import {PoseidonT8} from "poseidon-solidity/PoseidonT8.sol";
+
+// In revealAndSettle:
+bytes32 sellerHash = bytes32(PoseidonT8.hash([
+    uint256(seller.orderId), uint256(uint160(seller.user)),
+    uint256(uint160(seller.sellToken)), uint256(uint160(seller.buyToken)),
+    seller.sellAmount, seller.minBuyAmount, seller.expiresAt
+]));
+require(sellerHash == sellerC.orderHash, "Seller hash mismatch");
+```
+
+On-chain Poseidon costs ~100k gas per hash — acceptable for a fallback path. The `poseidon-solidity` library is battle-tested (used by Tornado Cash, Semaphore, WorldID).
 
 ---
 
@@ -660,13 +733,17 @@ User opens app, connects MetaMask
 User fills order form: SELL 1000 USDC for ≥ 0.5 WETH, expires in 24h
   │
   ├── FRONTEND (useSubmitTrade hook) ────────────────────────────────
-  │   1. Generate orderId: keccak256(abi.encodePacked(address, block.timestamp, nonce))
-  │      // Or use crypto.randomUUID() → bytes32
+  │   1. Generate orderId — masked to 253 bits for BN128 field compatibility:
+  │      const raw = keccak256(encodeAbiParameters([...], [address, timestamp, nonce]));
+  │      const orderId = BigInt(raw) & ((1n << 253n) - 1n);  // always < SNARK_SCALAR_FIELD
+  │      // 253-bit IDs give ~10^76 unique values — collision probability is effectively zero
   │
   │   2. Compute orderHash using Poseidon (ZK-friendly, enables private settlement):
   │      import { buildPoseidon } from 'circomlibjs';
   │      const poseidon = await buildPoseidon();
-  │      const orderHash = poseidon([orderId, userAddress, USDC_ADDR, WETH_ADDR, 1000e6, 0.5e18, expiresAt]);
+  │      const hash = poseidon([orderId, userAddress, USDC_ADDR, WETH_ADDR, 1000e6, 0.5e18, expiresAt]);
+  │      const orderHash = '0x' + poseidon.F.toString(hash, 16).padStart(64, '0');
+  │      // Poseidon output is a field element (~254 bits), always < SNARK_SCALAR_FIELD
   │
   │   3. Check USDC allowance for Router:
   │      IF insufficient → *** WALLET POPUP *** approve(ROUTER, MaxUint256)
@@ -1195,18 +1272,30 @@ App Session exists but close fails (rare — engine has full authority):
 - TODO: Update `MockYellowCustody.sol` to match 3-param signature
 - TODO: Update and run Foundry tests
 
-### Phase 1b: Partial Fill Support + ZK Private Settlement
+### Phase 1b: Partial Fill Support
 1. Add `settledAmount` to Commitment struct, remove `Settling` status
 2. Update `revealAndSettle` with fill amounts and proportional slippage
 3. Simplify `markFullySettled` to per-order
 4. Update `cancel` to allow partially filled orders
-5. Write Circom circuit (Poseidon hash verification + all settlement constraints)
-6. Generate Groth16 verifier contract via snarkjs
-7. Add `proveAndSettle` function to DarkPoolRouter (calls ZK verifier)
-8. Add Poseidon hash computation to frontend (`circomlibjs`) and backend (`circomlibjs`)
-9. Update `commitmentVerifier.ts` to use Poseidon
-10. Add proof generation to settlement service (`snarkjs` in Node.js)
-11. Update Foundry tests for partial fills + ZK verification
+5. Foundry tests for partial fills
+
+### Phase 1c: ZK Private Settlement
+1. Install Circom toolchain + Powers of Tau
+2. Write Circom circuit (Poseidon hash verification + all settlement constraints)
+3. Generate Groth16 verifier contract via snarkjs
+4. Add `proveAndSettle` function to DarkPoolRouter (calls ZK verifier)
+5. Circuit unit tests
+
+### Phase 1d: Poseidon Hash Integration
+1. Install `poseidon-solidity` in contracts (`forge install poseidon-solidity/poseidon-solidity`)
+2. Update `revealAndSettle` to use on-chain Poseidon (replaces `keccak256(abi.encode(...))`)
+3. Add `SNARK_SCALAR_FIELD` constant and field bounds checks in `depositAndCommit`
+4. Create Poseidon utility module (shared between frontend + backend, `circomlibjs`)
+5. Add orderId 253-bit masking in frontend for BN128 field compatibility
+6. Update frontend `useSubmitTrade` to use Poseidon hash
+7. Update backend `commitmentVerifier.ts` to use Poseidon
+8. Add proof generation service (`snarkjs` in Node.js)
+9. Update Foundry tests for Poseidon hashes
 
 ### Phase 2: Database Migration
 1. New migration `002_settlement_and_session_keys.up.sql`
@@ -1228,11 +1317,13 @@ App Session exists but close fails (rare — engine has full authority):
 4. Withdrawal UI (on-chain custody balance query + withdrawal tx)
 
 ### Phase 5: Settlement Service (Backend)
-1. Engine boot: Yellow WS connection + auth + asset map
-2. Settlement worker: poll PENDING matches
-3. Settlement pipeline: generate ZK proof → proveAndSettle → create App Session → close → markFullySettled
-4. Error handling, retries, status tracking (including partial fill state management)
-5. WebSocket notifications to users
+1. Engine boot: Yellow WS connection + auth + asset map + re-auth every ~23h
+2. Engine wallet management: load key, nonce tracking for sequential txs
+3. Settlement worker: poll PENDING matches
+4. Settlement pipeline: generate ZK proof → proveAndSettle → create App Session → close → markFullySettled
+5. Fallback path: if proof generation fails → revealAndSettle with order details as calldata
+6. Error handling, retries, status tracking (including partial fill state management)
+7. WebSocket notifications to users
 
 ### Phase 6: Testing
 1. Contract tests: update mock, test settlement flow, partial fills, ZK verification
@@ -1313,3 +1404,9 @@ Zero-allocation participants need nothing: no custody balance, no session key re
 
 ### 13. Balance Querying — RESOLVED
 `Custody.getAccountsBalances(address[], address[])` is a public view function. Direct `eth_call`, no auth, no WS connection. SDK wrapper: `NitroliteService.getAccountBalance()`. Source: `.reference/nitrolite/contract/src/Custody.sol:95-108`.
+
+### 14. BN128 Field Bounds for ZK Inputs — RESOLVED
+Groth16 public inputs must be < SNARK_SCALAR_FIELD (~2^254). No limb splitting needed because: (a) Poseidon outputs are field elements by construction (always < field), (b) practical ERC-20 amounts are < 2^128, (c) addresses are 160 bits, (d) timestamps are ~32 bits. The one exception is `orderId` generated via `keccak256(...)` which is full 256-bit — solved by masking to 253 bits (`BigInt(raw) & ((1n << 253n) - 1n)`). Contract adds defensive `require(uint256(orderHash) < SNARK_SCALAR_FIELD)` in `depositAndCommit`.
+
+### 15. On-Chain Poseidon for revealAndSettle Fallback — RESOLVED
+Since commitments are now Poseidon hashes, the `revealAndSettle` fallback must recompute Poseidon on-chain (not keccak256). This requires the `poseidon-solidity` library (`forge install poseidon-solidity/poseidon-solidity`). `PoseidonT8.hash(...)` costs ~100k gas per call — acceptable for a fallback path. Library is battle-tested (Tornado Cash, Semaphore, WorldID). Both settlement paths now verify against the same Poseidon commitment hash.

@@ -82,7 +82,7 @@ The user deposits tokens and commits the order hash in a single on-chain call. F
 
 ### How Authorization Works
 
-No EIP-712 signatures needed. When the user calls `depositAndCommit`, `msg.sender` is recorded in the commitment. The order hash is `keccak256(abi.encode(OrderDetails))` where `OrderDetails` includes the user's address:
+No EIP-712 signatures needed. When the user calls `depositAndCommit`, `msg.sender` is recorded in the commitment. The order hash is `poseidon(OrderDetails)` (Poseidon hash for ZK compatibility) where `OrderDetails` includes the user's address:
 
 ```solidity
 struct OrderDetails {
@@ -204,8 +204,8 @@ All verified cryptographically — order details never appear on-chain.
 ### What revealAndSettle Verifies (fallback, order details public)
 
 1. Both orders are `Active`
-2. `keccak256(abi.encode(seller)) == sellerC.orderHash` (hash integrity)
-3. `keccak256(abi.encode(buyer)) == buyerC.orderHash`
+2. `poseidon(seller.*) == sellerC.orderHash` (hash integrity, via `poseidon-solidity` on-chain library)
+3. `poseidon(buyer.*) == buyerC.orderHash`
 4. Neither order has expired
 5. Tokens match cross-wise (seller.sell = buyer.buy)
 6. Fill amounts don't exceed remaining (partial fill support)
@@ -276,7 +276,7 @@ contract DarkPoolRouter {
 
 ### Order Book Poisoning Prevention
 - Backend reads on-chain commitment hash via RPC before accepting order
-- Recomputes `keccak256(abi.encode(OrderDetails))` from submitted data
+- Recomputes `poseidon(OrderDetails)` from submitted data (same hash as frontend and ZK circuit)
 - Rejects if hash doesn't match — attacker can't fake a commitment
 
 ### Slippage Protection
@@ -345,3 +345,9 @@ App Sessions use lowercase string symbols (`"usdc"`, `"weth"`), not token addres
 
 ### 7. Session Key Expiry — RESOLVED
 30 days, no enforced maximum. Explicit revocation via `revoke_session_key` when user logs out or all orders filled. JWT (24h) is separate and irrelevant for settlement.
+
+### 8. BN128 Field Bounds — RESOLVED
+All ZK circuit inputs must be < SNARK_SCALAR_FIELD (~2^254). No limb splitting needed: Poseidon outputs are field elements (always fit), practical amounts < 2^128, addresses 160-bit, timestamps tiny. Only `orderId` needs explicit handling — mask to 253 bits. See [SETTLEMENT_IMPLEMENTATION.md](./SETTLEMENT_IMPLEMENTATION.md).
+
+### 9. On-Chain Poseidon for Fallback — RESOLVED
+`revealAndSettle` uses `poseidon-solidity` library for on-chain hash verification. Both `proveAndSettle` (ZK) and `revealAndSettle` (fallback) verify against the same Poseidon commitment. See [SETTLEMENT_IMPLEMENTATION.md](./SETTLEMENT_IMPLEMENTATION.md).
