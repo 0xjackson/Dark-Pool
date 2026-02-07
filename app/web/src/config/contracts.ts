@@ -73,6 +73,7 @@ export const ROUTER_ABI = [
       { name: 'user', type: 'address' },
       { name: 'orderHash', type: 'bytes32' },
       { name: 'timestamp', type: 'uint256' },
+      { name: 'settledAmount', type: 'uint256' },
       { name: 'status', type: 'uint8' },
     ],
   },
