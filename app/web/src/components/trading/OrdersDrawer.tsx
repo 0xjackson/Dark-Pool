@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useUserOrders } from '@/hooks/useUserOrders';
 import { useUserMatches } from '@/hooks/useUserMatches';
+import { useSettlementUpdates } from '@/hooks/useSettlementUpdates';
 import { OrderCard } from './OrderCard';
 import { MatchCard } from './MatchCard';
 
@@ -69,6 +70,12 @@ export function OrdersDrawer({ isOpen, onClose, userAddress, onRefreshTrigger }:
 
   // Count of pending orders for badge
   const pendingCount = openOrders.length;
+
+  // Real-time settlement/match updates via WebSocket
+  useSettlementUpdates(
+    useCallback(() => { refreshOrders(); refreshMatches(); }, [refreshOrders, refreshMatches]),
+    useCallback(() => { refreshOrders(); refreshMatches(); }, [refreshOrders, refreshMatches]),
+  );
 
   // Trigger refresh when onRefreshTrigger changes
   useEffect(() => {
