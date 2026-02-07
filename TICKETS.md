@@ -114,10 +114,11 @@ Circom + Groth16 + Poseidon stack. Enables settlement without revealing order de
 - **Blocks:** ZK-005
 - **Done:** Groth16Verifier.sol generated, WASM + zkey copied to `app/server/circuits/`
 
-### ZK-004: Circuit unit tests
-- **File:** `circuits/test/settlement.test.js` (new)
+### ZK-004: Circuit unit tests ✅
+- **File:** `circuits/test/settlementMatch.test.js` (new)
 - **Change:** Test with valid inputs (proof generates and verifies). Test with invalid inputs (hash mismatch, expired, overfill, bad slippage — all should fail). Use `snarkjs` JS API to generate and verify proofs in tests.
 - **Blocked by:** ZK-002
+- **Done:** 16 tests covering full fills, partial fills, hash verification, token matching, expiry, overfill prevention, slippage, and Poseidon consistency. All pass.
 
 ### ZK-005: Add proveAndSettle to DarkPoolRouter ✅
 - **File:** `contracts/src/DarkPoolRouter.sol`
@@ -283,15 +284,17 @@ Frontend hooks and components for session key authorization at wallet connect.
 - **Change:** Replace `keccak256(encodeAbiParameters(...))` with Poseidon hash computation using shared utility from PH-004. Ensure hash matches what backend expects and what circuit will verify.
 - **Blocked by:** PH-004
 
-### FE-004: Balance display component
+### FE-004: Balance display component ✅
 - **File:** `app/web/src/components/wallet/CustodyBalance.tsx` (new)
 - **Change:** Component that queries `Custody.getAccountsBalances()` on-chain for the connected user. Displays balances for supported tokens. Auto-refreshes on new blocks or after settlements. No auth needed (public view function).
 - **Blocks:** FE-005
+- **Done:** Queries Yellow Custody getAccountsBalances() for connected wallet, shows all chain tokens, refreshes every 15s
 
-### FE-005: Withdrawal UI
+### FE-005: Withdrawal UI ✅
 - **File:** `app/web/src/components/wallet/WithdrawButton.tsx` (new)
-- **Change:** Button/modal that lets user withdraw from Yellow Custody. Calls `custody.withdrawal(token, amount)` on-chain. Shows balance, lets user input amount, confirms via wallet signature.
+- **Change:** Button/modal that lets user withdraw from Yellow Custody. Calls `custody.withdraw(token, amount)` on-chain. Shows balance, lets user input amount, confirms via wallet signature.
 - **Blocked by:** FE-004
+- **Done:** Inline withdraw input with MAX button, calls custody.withdraw(token, amount), shows pending/confirmed/success states
 
 ### FE-006: Install Nitrolite SDK
 - **File:** `app/web/package.json`
