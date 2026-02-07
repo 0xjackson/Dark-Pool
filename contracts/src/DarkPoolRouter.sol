@@ -19,6 +19,7 @@ pragma solidity ^0.8.19;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "./interfaces/IYellowCustody.sol";
+import {IZKVerifier} from "./interfaces/IZKVerifier.sol";
 import {PoseidonT6} from "poseidon-solidity/PoseidonT6.sol";
 import {PoseidonT4} from "poseidon-solidity/PoseidonT4.sol";
 
@@ -38,6 +39,7 @@ contract DarkPoolRouter {
 
     IYellowCustody public immutable custody;
     address public immutable engine;
+    IZKVerifier public immutable zkVerifier;
 
     mapping(bytes32 => Commitment) public commitments;
 
@@ -84,9 +86,10 @@ contract DarkPoolRouter {
 
     // ============ CONSTRUCTOR ============
 
-    constructor(address _custody, address _engine) {
+    constructor(address _custody, address _engine, address _zkVerifier) {
         custody = IYellowCustody(_custody);
         engine = _engine;
+        zkVerifier = IZKVerifier(_zkVerifier);
     }
 
     // ============ INTERNAL ============
@@ -225,6 +228,50 @@ contract DarkPoolRouter {
         //   buyerFillAmount * seller.sellAmount >= sellerFillAmount * seller.minBuyAmount
         require(buyerFillAmount * seller.sellAmount >= sellerFillAmount * seller.minBuyAmount, "Seller slippage");
         require(sellerFillAmount * buyer.sellAmount >= buyerFillAmount * buyer.minBuyAmount, "Buyer slippage");
+
+        // Update settled amounts (order stays Active for more partial fills)
+        sellerC.settledAmount += sellerFillAmount;
+        buyerC.settledAmount += buyerFillAmount;
+
+        emit OrdersSettling(sellerOrderId, buyerOrderId);
+    }
+
+    /// @notice Settle a match using a ZK proof — order details stay private.
+    /// @dev The proof verifies: hash correctness, token match, expiry, no overfill, slippage.
+    ///      The contract reads commitment hashes + settledAmounts from storage and passes
+    ///      them as public inputs. This prevents replay (settledAmount changes after each call,
+    ///      making old proofs invalid).
+    function proveAndSettle(
+        bytes32 sellerOrderId,
+        bytes32 buyerOrderId,
+        uint256 sellerFillAmount,
+        uint256 buyerFillAmount,
+        uint256[2] calldata a,
+        uint256[2][2] calldata b,
+        uint256[2] calldata c
+    ) external {
+        require(msg.sender == engine, "Only engine");
+
+        Commitment storage sellerC = commitments[sellerOrderId];
+        Commitment storage buyerC = commitments[buyerOrderId];
+
+        require(sellerC.status == Status.Active, "Seller not active");
+        require(buyerC.status == Status.Active, "Buyer not active");
+        require(sellerFillAmount > 0, "Zero seller fill");
+        require(buyerFillAmount > 0, "Zero buyer fill");
+
+        // Build public inputs array — must match circuit's public signal order exactly
+        uint256[7] memory pubInputs = [
+            uint256(sellerC.orderHash),   // [0] sellerCommitmentHash
+            uint256(buyerC.orderHash),    // [1] buyerCommitmentHash
+            sellerFillAmount,             // [2] sellerFillAmount
+            buyerFillAmount,              // [3] buyerFillAmount
+            sellerC.settledAmount,        // [4] sellerSettledSoFar
+            buyerC.settledAmount,         // [5] buyerSettledSoFar
+            block.timestamp               // [6] currentTimestamp
+        ];
+
+        require(zkVerifier.verifyProof(a, b, c, pubInputs), "Invalid proof");
 
         // Update settled amounts (order stays Active for more partial fills)
         sellerC.settledAmount += sellerFillAmount;
