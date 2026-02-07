@@ -49,9 +49,10 @@ Dark Pool is a private, peer-to-peer trading protocol for large crypto trades. U
 | Backend | Node.js + Express + WebSocket | API, order verification, Yellow SDK |
 | Matching Engine | Warlock (Go + gRPC) | Private orderbook matching |
 | Database | PostgreSQL | Order storage, history |
-| Contracts | Solidity + Foundry | DarkPoolRouter, commitments |
-| Settlement | Yellow Network App Sessions | Atomic P2P transfers |
-| Custody | Yellow Custody Contract | Fund management |
+| Contracts | Solidity + Foundry | DarkPoolRouter, commitments, ZK verifier |
+| ZK Proofs | Circom + Groth16 + Poseidon | Private settlement (no order detail reveal) |
+| Settlement | Yellow Network App Sessions | Atomic P2P transfers (cross-chain via unified balance) |
+| Custody | Yellow Custody Contract | Fund management (deployed on multiple chains) |
 
 ---
 
@@ -100,14 +101,12 @@ The hash alone proves: who placed the order, what tokens, what amounts, and when
 ### Frontend Flow (useSubmitTrade hook)
 
 ```typescript
-// 1. Compute order hash matching contract's keccak256(abi.encode(OrderDetails))
-const orderHash = keccak256(
-  encodeAbiParameters(
-    [{ type: 'bytes32' }, { type: 'address' }, { type: 'address' },
-     { type: 'address' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }],
-    [orderId, address, sellToken, buyToken, sellAmount, minBuyAmount, expiresAt]
-  )
-);
+// 1. Compute order hash using Poseidon (ZK-friendly hash, enables private settlement)
+// Poseidon produces the same bytes32 commitment but can be verified inside a ZK circuit
+// in ~250 constraints vs keccak256's ~150,000 — enabling sub-second proof generation
+import { buildPoseidon } from 'circomlibjs';
+const poseidon = await buildPoseidon();
+const orderHash = poseidon([orderId, address, sellToken, buyToken, sellAmount, minBuyAmount, expiresAt]);
 
 // 2. Check allowance, approve if needed (MaxUint256 = one-time)
 if (allowance < sellAmount) {
@@ -136,8 +135,8 @@ The backend verifies the submitted order details match the on-chain commitment b
 // Backend reads commitment from DarkPoolRouter via RPC (~50ms)
 const commitment = await contract.commitments(orderId);
 
-// Recompute hash from submitted details
-const expectedHash = computeOrderHash(orderId, user, sellToken, buyToken, ...);
+// Recompute Poseidon hash from submitted details (same hash function as frontend)
+const expectedHash = poseidon([orderId, user, sellToken, buyToken, sellAmount, minBuyAmount, expiresAt]);
 
 // If hash doesn't match, reject — prevents order book poisoning
 if (expectedHash !== commitment.orderHash) {
@@ -177,25 +176,40 @@ When a match is found, settlement happens in two phases:
 
 ```typescript
 // PHASE 1: ON-CHAIN VERIFICATION (engine calls contract)
-await router.revealAndSettle(sellerOrderId, buyerOrderId, sellerDetails, buyerDetails);
-// Contract checks: active status, hash match, expiry, token match, slippage
+// With ZK (production) — order details stay private:
+const proof = await snarkjs.groth16.fullProve(inputs, wasmPath, zkeyPath);
+await router.proveAndSettle(sellerOrderId, buyerOrderId, sellerFillAmount, buyerFillAmount, proof);
+
+// Without ZK (fallback/testing):
+await router.revealAndSettle(sellerOrderId, buyerOrderId, sellerDetails, buyerDetails, sellerFillAmount, buyerFillAmount);
 
 // PHASE 2: YELLOW APP SESSION (atomic P2P swap)
-const session = await yellowSDK.createAppSession({ ... });
-await yellowSDK.closeAppSession({ ... }); // swapped allocations
+const session = await yellowSDK.createAppSession({ ... });   // per partial fill
+await yellowSDK.closeAppSession({ ... });                     // swapped allocations
 
-// PHASE 3: FINALIZE
-await router.markFullySettled(sellerOrderId, buyerOrderId);
+// PHASE 3: FINALIZE (per order, when fully filled)
+await router.markFullySettled(orderId);
 ```
 
-### What revealAndSettle Verifies
+### What proveAndSettle Verifies (via ZK proof)
+
+1. Both commitment hashes match order details (Poseidon hash, private)
+2. Neither order has expired
+3. Tokens match cross-wise (seller.sell = buyer.buy)
+4. Fill amounts don't exceed remaining (supports partial fills)
+5. Proportional slippage constraints met (rate-based, not total-based)
+
+All verified cryptographically — order details never appear on-chain.
+
+### What revealAndSettle Verifies (fallback, order details public)
 
 1. Both orders are `Active`
 2. `keccak256(abi.encode(seller)) == sellerC.orderHash` (hash integrity)
 3. `keccak256(abi.encode(buyer)) == buyerC.orderHash`
 4. Neither order has expired
 5. Tokens match cross-wise (seller.sell = buyer.buy)
-6. Slippage constraints met (each side gets >= minBuyAmount)
+6. Fill amounts don't exceed remaining (partial fill support)
+7. Proportional slippage constraints met
 
 ### Why MEV Can't Attack
 
@@ -217,12 +231,13 @@ contract DarkPoolRouter {
 
     mapping(bytes32 => Commitment) public commitments;
 
-    enum Status { None, Active, Settling, Settled, Cancelled }
+    enum Status { None, Active, Settled, Cancelled }
 
     struct Commitment {
         address user;
         bytes32 orderHash;
         uint256 timestamp;
+        uint256 settledAmount;   // tracks cumulative fills (partial fill support)
         Status status;
     }
 
@@ -242,8 +257,9 @@ contract DarkPoolRouter {
     function cancel(bytes32 orderId) external;
 
     // Engine functions
-    function revealAndSettle(bytes32 sellerOrderId, bytes32 buyerOrderId, OrderDetails calldata seller, OrderDetails calldata buyer) external;
-    function markFullySettled(bytes32 sellerOrderId, bytes32 buyerOrderId) external;
+    function proveAndSettle(bytes32 sellerOrderId, bytes32 buyerOrderId, uint256 sellerFillAmount, uint256 buyerFillAmount, bytes calldata proof) external;
+    function revealAndSettle(bytes32 sellerOrderId, bytes32 buyerOrderId, OrderDetails calldata seller, OrderDetails calldata buyer, uint256 sellerFillAmount, uint256 buyerFillAmount) external;
+    function markFullySettled(bytes32 orderId) external;
 }
 ```
 
@@ -252,10 +268,11 @@ contract DarkPoolRouter {
 ## Security
 
 ### MEV Protection
-- Orders hidden via commit-reveal
+- Orders hidden via commit-reveal (Poseidon hash commitment)
 - Matching is off-chain and private
 - Settlement is P2P (no pool to sandwich)
-- Reveal + settle is atomic
+- ZK proof settlement keeps order details private even after settlement (no reveal)
+- `revealAndSettle` fallback reveals details, but matching is already complete
 
 ### Order Book Poisoning Prevention
 - Backend reads on-chain commitment hash via RPC before accepting order
@@ -267,7 +284,8 @@ contract DarkPoolRouter {
 - Cannot settle below user's minimum
 
 ### Replay Protection
-- Order status tracked (Active → Settling → Settled)
+- Order status tracked (Active → Settled)
+- `settledAmount` tracks cumulative fills, prevents overfilling
 - Cannot reuse commitments
 - `require(status == Status.None, "Order exists")` prevents double-commit
 
@@ -296,11 +314,12 @@ contract DarkPoolRouter {
 
 | Action | Key Used | Purpose |
 |--------|----------|---------|
-| `revealAndSettle` tx | Engine wallet | On-chain verification gate |
+| Generate ZK proof | N/A (computation, not signing) | Prove settlement validity without revealing order details |
+| `proveAndSettle` tx | Engine wallet | On-chain verification gate (ZK proof, no order details revealed) |
 | App Session create (seller sig) | Seller's stored session key | Fund-owner consent |
 | App Session create (buyer sig) | Buyer's stored session key | Fund-owner consent |
 | App Session close | Engine session key | Swap allocations (weight 100) |
-| `markFullySettled` tx | Engine wallet | On-chain finalization |
+| `markFullySettled` tx | Engine wallet | On-chain finalization (per order) |
 
 ---
 

@@ -132,7 +132,206 @@ function depositAndCommit(address token, uint256 depositAmount, bytes32 orderId,
 }
 ```
 
-`commitOnly()`, `cancel()`, `revealAndSettle()`, and `markFullySettled()` are unchanged.
+`commitOnly()` and `cancel()` are unchanged. `revealAndSettle()` and `markFullySettled()` are updated for partial fills and ZK — see below.
+
+---
+
+## Partial Fill Support
+
+Orders can match partially. If User A sells 100 ETH and User B buys 60 ETH, a match is created for 60 ETH. User A's remaining 40 ETH stays active for future matching.
+
+### Contract Changes for Partial Fills
+
+```solidity
+struct Commitment {
+    address user;
+    bytes32 orderHash;
+    uint256 timestamp;
+    uint256 settledAmount;    // tracks cumulative filled amount
+    Status status;            // Active until fully settled or cancelled
+}
+
+// Settling status removed — each match is tracked off-chain in matches table
+enum Status { None, Active, Settled, Cancelled }
+```
+
+`revealAndSettle` (or `proveAndSettle` with ZK) accepts fill amounts per match:
+- Verifies fill amounts don't exceed remaining (`sellAmount - settledAmount`)
+- Uses proportional slippage: `buyerFillAmount * seller.sellAmount >= sellerFillAmount * seller.minBuyAmount`
+- Increments `settledAmount` for each side
+- Order stays `Active` until fully filled
+
+`markFullySettled` operates per-order (not per-pair) since two sides may complete at different times.
+
+`cancel` is allowed on partially filled orders — cancels the unfilled remainder.
+
+### Warlock Already Supports Partial Fills
+
+The matching engine handles partial fills natively:
+- `matchQty = min(incomingOrder.RemainingQuantity, candidate.RemainingQuantity)` (`algorithm.go:88`)
+- Orders transition to `PARTIALLY_FILLED` status and remain matchable
+- A single order can match against multiple counterparties sequentially
+
+### Each Partial Match = Separate App Session
+
+Yellow App Sessions don't support partial close. Each partial fill creates a separate App Session:
+- Match 1 (60 ETH): create session → close with swapped allocations
+- Match 2 (40 ETH): create new session → close with swapped allocations
+- User's remaining balance stays in Yellow unified custody between fills
+
+---
+
+## ZK Private Settlement (Planned — Circom + Groth16 + Poseidon)
+
+### Why ZK
+
+`revealAndSettle` requires order details as public calldata to verify the commitment hash. With partial fills, this reveals the full order (total size, price limits, remaining amount) on the first fill. ZK eliminates the reveal entirely — the engine proves the settlement is valid without showing order details.
+
+### Stack: Circom + Groth16 + Poseidon
+
+| Component | Choice | Why |
+|-----------|--------|-----|
+| Circuit language | **Circom** | Most battle-tested on Ethereum (Tornado Cash, WorldID, Semaphore) |
+| Proof system | **Groth16** | Cheapest on-chain verification (~200k gas, constant) |
+| Hash function | **Poseidon** | ZK-friendly (~250 constraints vs keccak256's ~150,000) |
+| JS prover | **snarkjs** | Native Node.js, no external binary needed |
+| Solidity verifier | **Auto-generated** | `snarkjs generateverifier` outputs a Solidity contract |
+| Frontend hash | **circomlibjs** | Poseidon computation in JS, same BN128 field |
+| On-chain hash | **poseidon-solidity** | Poseidon computation in Solidity (for `commitmentVerifier`) |
+
+### Commitment Hash: keccak256 → Poseidon
+
+Poseidon is a hash designed for ZK circuits — ~250 constraints vs keccak256's ~150,000. Same cryptographic security.
+
+```
+// Current
+orderHash = keccak256(abi.encode(orderId, user, sellToken, buyToken, sellAmount, minBuyAmount, expiresAt))
+
+// With ZK
+orderHash = poseidon(orderId, user, sellToken, buyToken, sellAmount, minBuyAmount, expiresAt)
+```
+
+**The contract's `depositAndCommit` doesn't change** — it stores a `bytes32` hash without computing it. The hash function change is in the frontend (order submission) and backend (commitment verification).
+
+### The ZK Circuit
+
+```
+PRIVATE INPUTS (witness — never revealed on-chain):
+  - seller OrderDetails { orderId, user, sellToken, buyToken, sellAmount, minBuyAmount, expiresAt }
+  - buyer OrderDetails  { same fields }
+
+PUBLIC INPUTS (visible on-chain):
+  - sellerCommitmentHash, buyerCommitmentHash (from contract storage)
+  - sellerFillAmount, buyerFillAmount (match amounts)
+  - sellerSettledSoFar, buyerSettledSoFar (cumulative settled)
+  - currentTimestamp
+
+CIRCUIT PROVES:
+  1. poseidon(seller.*) == sellerCommitmentHash        // commitment integrity
+  2. poseidon(buyer.*)  == buyerCommitmentHash         // commitment integrity
+  3. seller.sellToken == buyer.buyToken                 // token match
+  4. seller.buyToken  == buyer.sellToken                // token match
+  5. currentTimestamp < seller.expiresAt                // not expired
+  6. currentTimestamp < buyer.expiresAt                 // not expired
+  7. sellerFillAmount <= seller.sellAmount - sellerSettledSoFar  // no overfill
+  8. buyerFillAmount  <= buyer.sellAmount  - buyerSettledSoFar   // no overfill
+  9. buyerFillAmount * seller.sellAmount >= sellerFillAmount * seller.minBuyAmount   // seller slippage
+  10. sellerFillAmount * buyer.sellAmount >= buyerFillAmount * buyer.minBuyAmount    // buyer slippage
+```
+
+Circuit size: ~5,000–10,000 constraints. Proof generation: <1 second. On-chain verification: ~200k gas.
+
+### Contract: `proveAndSettle`
+
+```solidity
+function proveAndSettle(
+    bytes32 sellerOrderId,
+    bytes32 buyerOrderId,
+    uint256 sellerFillAmount,
+    uint256 buyerFillAmount,
+    bytes calldata proof
+) external {
+    require(msg.sender == engine, "Only engine");
+
+    Commitment storage sellerC = commitments[sellerOrderId];
+    Commitment storage buyerC = commitments[buyerOrderId];
+
+    require(sellerC.status == Status.Active, "Seller not active");
+    require(buyerC.status == Status.Active, "Buyer not active");
+
+    // Verify ZK proof — replaces hash check, slippage check, expiry check, token match
+    uint256[] memory publicInputs = new uint256[](7);
+    publicInputs[0] = uint256(sellerC.orderHash);
+    publicInputs[1] = uint256(buyerC.orderHash);
+    publicInputs[2] = sellerFillAmount;
+    publicInputs[3] = buyerFillAmount;
+    publicInputs[4] = sellerC.settledAmount;
+    publicInputs[5] = buyerC.settledAmount;
+    publicInputs[6] = block.timestamp;
+
+    require(zkVerifier.verify(proof, publicInputs), "Invalid proof");
+
+    sellerC.settledAmount += sellerFillAmount;
+    buyerC.settledAmount += buyerFillAmount;
+
+    emit OrdersSettling(sellerOrderId, buyerOrderId);
+}
+```
+
+No OrderDetails in calldata. No reveal. Order details stay private through the entire fill lifecycle.
+
+### What's Visible vs Hidden On-Chain
+
+| | Without ZK | With ZK |
+|---|---|---|
+| Commitment hash | Visible (opaque) | Same |
+| Total order size | **Revealed at first settle** | **Hidden forever** |
+| Price limits / minBuyAmount | **Revealed at first settle** | **Hidden forever** |
+| Token pair | **Revealed at first settle** | **Hidden forever** |
+| Fill amounts per match | Visible | Visible |
+| Remaining unfilled amount | **Computable after reveal** | **Unknown** |
+
+### `revealAndSettle` Stays as Fallback
+
+Both functions coexist:
+- `proveAndSettle` — private settlement with ZK proof (production path)
+- `revealAndSettle` — non-private fallback for debugging, testing, or if ZK proof generation fails
+
+---
+
+## Cross-Chain Support (via Yellow Network)
+
+### How It Works
+
+Yellow Network provides cross-chain settlement natively via **unified balance abstraction** — no bridges, no wrapped tokens:
+
+1. User A deposits USDC on **Ethereum** → Custody contract locks it → Clearnode credits unified balance
+2. User B deposits USDC on **Base** → Custody contract locks it → Clearnode credits unified balance
+3. Warlock matches them (chain-agnostic — matching engine doesn't know about chains)
+4. Engine settles via App Session using **unified balance** (off-chain, instant)
+5. User A withdraws on Ethereum, User B withdraws on Base
+
+The Clearnode manages a double-entry ledger across chains. Off-chain transfers between users don't need on-chain transactions.
+
+### Evidence from Reference Repos
+
+- **Contract deployments** on 12+ chains: `.reference/nitrolite/contract/deployments/` — Ethereum (1), BSC (56), Polygon (137), Base (8453), Linea (59144), plus testnets
+- **Unified balance docs**: `.reference/yellow-docs/docs/protocol/glossary.mdx` — "Cross-chain transfers without bridges"
+- **SDK types**: `.reference/nitrolite/sdk/src/rpc/types/common.ts` — `RPCAsset` and `RPCChannelUpdate` include `chainId` fields
+- **Cerebro CLI**: `.reference/nitrolite/examples/cerebro/README.md` — "orchestrating cross-chain operations"
+- **Implementation checklist**: `.reference/yellow-docs/docs/protocol/implementation-checklist.mdx` — requires testing "cross-chain transfers (via unified balance)"
+
+### What We Need to Build
+
+| Component | Change |
+|-----------|--------|
+| DarkPoolRouter | Deploy on each supported chain (same contract, different addresses) |
+| Frontend | Chain selector for deposit/withdrawal |
+| Backend | Track which chain each user deposited on |
+| Warlock | No change — already chain-agnostic (matches on token pair, not chain) |
+| Yellow integration | No change — unified balance handles cross-chain natively |
+
+Cross-chain is mostly a deployment and UX concern, not an architecture change. Yellow does the hard part.
 
 ---
 
@@ -464,12 +663,10 @@ User fills order form: SELL 1000 USDC for ≥ 0.5 WETH, expires in 24h
   │   1. Generate orderId: keccak256(abi.encodePacked(address, block.timestamp, nonce))
   │      // Or use crypto.randomUUID() → bytes32
   │
-  │   2. Compute orderHash (must match contract's keccak256(abi.encode(OrderDetails))):
-  │      const orderHash = keccak256(encodeAbiParameters(
-  │        [{ type: 'bytes32' }, { type: 'address' }, { type: 'address' },
-  │         { type: 'address' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }],
-  │        [orderId, userAddress, USDC_ADDR, WETH_ADDR, 1000e6, 0.5e18, expiresAt]
-  │      ));
+  │   2. Compute orderHash using Poseidon (ZK-friendly, enables private settlement):
+  │      import { buildPoseidon } from 'circomlibjs';
+  │      const poseidon = await buildPoseidon();
+  │      const orderHash = poseidon([orderId, userAddress, USDC_ADDR, WETH_ADDR, 1000e6, 0.5e18, expiresAt]);
   │
   │   3. Check USDC allowance for Router:
   │      IF insufficient → *** WALLET POPUP *** approve(ROUTER, MaxUint256)
@@ -502,7 +699,7 @@ User fills order form: SELL 1000 USDC for ≥ 0.5 WETH, expires in 24h
   ├── BACKEND ───────────────────────────────────────────────────────
   │   7. commitmentVerifier.verifyCommitment(orderId, orderDetails):
   │      - Read commitment from contract via RPC
-  │      - Recompute hash from submitted details
+  │      - Recompute Poseidon hash from submitted details
   │      - REJECT if mismatch (anti-poisoning)
   │      // See: app/server/src/services/commitmentVerifier.ts
   │
@@ -551,28 +748,36 @@ Settlement worker finds PENDING match:
   │
   ├── STEP 1: ON-CHAIN VERIFICATION ────────────────────────────────
   │
-  │   Engine wallet sends tx:
-  │   router.revealAndSettle(
-  │     aliceOrderId, bobOrderId,
-  │     { orderId, user: Alice, sellToken: USDC, buyToken: WETH,
-  │       sellAmount: 1000e6, minBuyAmount: 0.5e18, expiresAt },
-  │     { orderId, user: Bob, sellToken: WETH, buyToken: USDC,
-  │       sellAmount: 0.6e18, minBuyAmount: 900e6, expiresAt }
-  │   )
+  │   PATH A — With ZK (production):
+  │     Engine generates Groth16 proof locally (~200ms via snarkjs)
+  │     Engine wallet sends tx:
+  │     router.proveAndSettle(
+  │       aliceOrderId, bobOrderId,
+  │       1000e6,    // aliceFillAmount (full fill in this example)
+  │       0.6e18,    // bobFillAmount
+  │       proof      // ZK proof (bytes)
+  │     )
+  │     Contract: verifies proof against public inputs (commitment hashes,
+  │       fill amounts, settled amounts, timestamp) via ZK verifier contract.
+  │     Order details NEVER appear on-chain.
   │
-  │   Contract verifies (DarkPoolRouter.sol:116-152):
-  │     ✓ msg.sender == engine
-  │     ✓ Both commitments Active
-  │     ✓ keccak256(abi.encode(aliceDetails)) == commitment.orderHash
-  │     ✓ keccak256(abi.encode(bobDetails)) == commitment.orderHash
-  │     ✓ Neither expired
-  │     ✓ alice.sellToken == bob.buyToken (USDC)
-  │     ✓ alice.buyToken == bob.sellToken (WETH)
-  │     ✓ bob.sellAmount(0.6 WETH) ≥ alice.minBuyAmount(0.5 WETH)
-  │     ✓ alice.sellAmount(1000 USDC) ≥ bob.minBuyAmount(900 USDC)
+  │   PATH B — Without ZK (fallback/testing):
+  │     Engine wallet sends tx:
+  │     router.revealAndSettle(
+  │       aliceOrderId, bobOrderId,
+  │       { orderId, user: Alice, sellToken: USDC, buyToken: WETH,
+  │         sellAmount: 1000e6, minBuyAmount: 0.5e18, expiresAt },
+  │       { orderId, user: Bob, sellToken: WETH, buyToken: USDC,
+  │         sellAmount: 0.6e18, minBuyAmount: 900e6, expiresAt },
+  │       1000e6, 0.6e18  // fill amounts
+  │     )
+  │     Contract: verifies hashes, slippage, expiry directly from calldata.
+  │     Order details are public in calldata.
   │
-  │   Both orders → Status.Settling
-  │   emit OrdersSettling(aliceOrderId, bobOrderId)
+  │   Both paths:
+  │     ✓ settledAmount incremented for each order
+  │     ✓ Orders stay Active (partial fills) or move to Settled (full fills)
+  │     emit OrdersSettling(aliceOrderId, bobOrderId)
   │
   │   UPDATE matches SET reveal_tx_hash = tx.hash WHERE id = $1
   │
@@ -772,13 +977,15 @@ The engine has operational authority but is constrained at every layer:
 | Layer | Constraint | What It Prevents | Source |
 |-------|-----------|------------------|--------|
 | On-chain commitment | `depositAndCommit` records exact trade terms tied to `msg.sender` | Engine can't fabricate orders | `DarkPoolRouter.sol:75-90` |
-| `revealAndSettle` | Contract verifies hashes, expiry, token match, slippage on-chain | Engine can't settle invalid/unfair trades | `DarkPoolRouter.sol:116-152` |
+| `proveAndSettle` (ZK) | Contract verifies ZK proof of hash integrity, expiry, token match, slippage — without seeing order details | Engine can't settle invalid/unfair trades; order details stay private | ZK verifier contract |
+| `revealAndSettle` (fallback) | Contract verifies hashes, expiry, token match, slippage directly from calldata | Same guarantees, but order details are public | `DarkPoolRouter.sol:116-152` |
+| Partial fill tracking | `settledAmount` prevents overfilling; proportional slippage check | Engine can't settle more than committed or at worse-than-committed rates | `DarkPoolRouter.sol` |
 | Session key allowances | Spending caps per asset (e.g., 10k USDC) | Engine can't drain user's full balance | `.reference/nitrolite/clearnode/session_key.go:88-100` |
 | Session key expiry | 30-day time-bounded authorization | Engine can't use stale keys | `.reference/nitrolite/clearnode/session_key.go:172` |
 | Session key revocation | User can revoke via `revoke_session_key` anytime | User has a kill switch | `.reference/nitrolite/clearnode/docs/API.md` |
-| On-chain audit trail | `OrdersSettling` / `OrdersSettled` events are public | Anyone can verify settlements match commitments | `DarkPoolRouter.sol:60-63` |
+| On-chain audit trail | `OrdersSettling` / `OrdersSettled` events are public | Anyone can verify settlements occurred | `DarkPoolRouter.sol:60-63` |
 
-`revealAndSettle` is the critical authorization gate. The contract has publicly verified the trade is legitimate before any funds move. Every settlement is auditable on-chain.
+`proveAndSettle` (with ZK) is the production authorization gate. The contract verifies a cryptographic proof that the trade is legitimate before any funds move — without revealing order details. `revealAndSettle` is retained as a fallback for testing and debugging.
 
 ---
 
@@ -932,14 +1139,21 @@ Settlement worker loads match → checks session key → expired
   → User reconnects → new session key → engine retries settlement
 ```
 
-### revealAndSettle Reverts
+### proveAndSettle / revealAndSettle Reverts
 
 ```
-Possible causes: order expired on-chain, already cancelled, hash mismatch
+Possible causes:
+  - "Invalid proof" → ZK proof verification failed (engine bug, stale order data, or circuit mismatch)
+  - "Seller/Buyer not active" → order cancelled or already fully settled
+  - "Seller/Buyer overfill" → fill amount exceeds remaining (partial fill accounting error)
+  - "Seller/Buyer hash mismatch" → (revealAndSettle only) submitted details don't match commitment
+  - "Seller/Buyer expired" → order expired on-chain
+
   → Catch revert error, log details
   → UPDATE matches SET settlement_status = 'FAILED',
     settlement_error = revert reason
   → Do NOT retry (deterministic failure)
+  → If "Invalid proof": check that engine's order data matches on-chain commitment
 ```
 
 ### Yellow WS Drops Mid-Settlement
@@ -981,6 +1195,19 @@ App Session exists but close fails (rare — engine has full authority):
 - TODO: Update `MockYellowCustody.sol` to match 3-param signature
 - TODO: Update and run Foundry tests
 
+### Phase 1b: Partial Fill Support + ZK Private Settlement
+1. Add `settledAmount` to Commitment struct, remove `Settling` status
+2. Update `revealAndSettle` with fill amounts and proportional slippage
+3. Simplify `markFullySettled` to per-order
+4. Update `cancel` to allow partially filled orders
+5. Write Circom circuit (Poseidon hash verification + all settlement constraints)
+6. Generate Groth16 verifier contract via snarkjs
+7. Add `proveAndSettle` function to DarkPoolRouter (calls ZK verifier)
+8. Add Poseidon hash computation to frontend (`circomlibjs`) and backend (`circomlibjs`)
+9. Update `commitmentVerifier.ts` to use Poseidon
+10. Add proof generation to settlement service (`snarkjs` in Node.js)
+11. Update Foundry tests for partial fills + ZK verification
+
 ### Phase 2: Database Migration
 1. New migration `002_settlement_and_session_keys.up.sql`
 2. Create `session_keys` table
@@ -1003,31 +1230,44 @@ App Session exists but close fails (rare — engine has full authority):
 ### Phase 5: Settlement Service (Backend)
 1. Engine boot: Yellow WS connection + auth + asset map
 2. Settlement worker: poll PENDING matches
-3. Settlement pipeline: revealAndSettle → create App Session → close → markFullySettled
-4. Error handling, retries, status tracking
+3. Settlement pipeline: generate ZK proof → proveAndSettle → create App Session → close → markFullySettled
+4. Error handling, retries, status tracking (including partial fill state management)
 5. WebSocket notifications to users
 
 ### Phase 6: Testing
-1. Contract tests: update mock, test settlement flow edge cases
-2. Backend tests: session key endpoints, settlement pipeline with mocks
-3. E2E: deposit → commit → match → settle → verify custody balances
-4. Edge cases: expired keys, reverted txs, cancellation, multi-trade reuse
+1. Contract tests: update mock, test settlement flow, partial fills, ZK verification
+2. Backend tests: session key endpoints, settlement pipeline with mocks, proof generation
+3. E2E: deposit → commit → match → prove → settle → verify custody balances
+4. Edge cases: expired keys, reverted txs, cancellation, partial fills, multi-trade reuse, invalid proofs
+
+### Phase 7: Cross-Chain Deployment
+1. Deploy DarkPoolRouter on additional chains (Base, Polygon, etc.)
+2. Frontend chain selector for deposit/withdrawal
+3. Backend: track deposit chain per user/order
+4. Warlock: no changes needed (already chain-agnostic)
+5. Test cross-chain settlement flow via Yellow unified balance
 
 ---
 
-## Future Improvements (Discussed, Not Yet Planned)
+## Future Improvements
+
+### ZK Private Settlement — PLANNED (Phase 1b)
+Circom + Groth16 + Poseidon. Engine generates ZK proof per settlement, contract verifies without seeing order details. Eliminates privacy leak from partial fills. See [ZK Private Settlement](#zk-private-settlement-planned--circom--groth16--poseidon) section above.
+
+### Cross-Chain Settlement — PLANNED (Phase 7)
+Deploy Router on multiple chains, leverage Yellow's unified balance for cross-chain atomic settlement without bridges. See [Cross-Chain Support](#cross-chain-support-via-yellow-network) section above.
 
 ### Batch Auctions (Priority: High)
-Replace Warlock's continuous matching with time-windowed batch auctions. Uniform clearing price, no ordering advantage, better price discovery. Most impactful improvement per unit of effort.
+Replace Warlock's continuous matching with time-windowed batch auctions. Uniform clearing price, no ordering advantage, better price discovery. Most impactful improvement per unit of effort. Pairs especially well with ZK — prove the entire batch's matching was correct in a single proof.
+
+### ZK Matching Fairness Proofs (Priority: Medium)
+Extend the ZK system to also prove matching correctness — that the engine followed the stated algorithm (price-time priority, no censorship, best execution). Would use a separate or extended circuit. With batch auctions, one proof per batch verifies the entire batch was fair.
 
 ### TEE Matching (Priority: Medium)
 Run Warlock in a Trusted Execution Environment (Intel TDX / AWS Nitro Enclave). Operator-blind matching — even the engine operator can't see order details. Remote attestation proves what code is running.
 
-### ZK Matching Proofs (Priority: Future)
-Engine produces a ZK proof that matching followed the algorithm (price-time priority, no censorship, best execution). Verifiable by anyone. Could be enforced at the contract level (proof required before `revealAndSettle`).
-
 ### Verifiable Private Batch Auction (Combined Vision)
-All three combined: TEE for privacy, batch auctions for fairness, ZK proofs for verifiability. A cryptographically verifiable dark pool where every step is provable. Nothing like this exists today.
+All combined: TEE for privacy, batch auctions for fairness, ZK proofs for verifiability. A cryptographically verifiable dark pool where every step is provable. Nothing like this exists today.
 
 ---
 
