@@ -1,5 +1,5 @@
 import { Token, TradingPair } from '../types/trading';
-import { mainnet, sepolia, baseSepolia } from 'wagmi/chains';
+import { mainnet, sepolia, baseSepolia, base } from 'wagmi/chains';
 
 /**
  * Token configurations for supported networks
@@ -69,9 +69,35 @@ export const BASE_SEPOLIA_TOKENS = {
 } as const;
 
 /**
+ * Base mainnet token addresses
+ */
+export const BASE_TOKENS = {
+  ETH: {
+    address: NATIVE_ETH_ADDRESS,
+    symbol: 'ETH',
+    decimals: 18,
+    name: 'Ethereum',
+  } as Token,
+  USDC: {
+    address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+    symbol: 'USDC',
+    decimals: 6,
+    name: 'USD Coin',
+  } as Token,
+} as const;
+
+/**
  * Trading pairs configuration by chain ID
  */
 export const TRADING_PAIRS: Record<number, TradingPair[]> = {
+  // Base Mainnet
+  [base.id]: [
+    {
+      id: 'ETH-USDC',
+      baseToken: BASE_TOKENS.ETH,
+      quoteToken: BASE_TOKENS.USDC,
+    },
+  ],
   // Ethereum Mainnet
   [mainnet.id]: [
     {
@@ -128,6 +154,10 @@ export function getTradingPair(
  */
 export function getChainTokens(chainId: number | undefined): Token[] {
   if (!chainId) return [];
+
+  if (chainId === base.id) {
+    return Object.values(BASE_TOKENS);
+  }
 
   if (chainId === mainnet.id) {
     return Object.values(MAINNET_TOKENS);

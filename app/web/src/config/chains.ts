@@ -1,4 +1,4 @@
-import { mainnet, sepolia, baseSepolia } from 'wagmi/chains';
+import { mainnet, sepolia, baseSepolia, base } from 'wagmi/chains';
 
 /**
  * Supported blockchain networks for Dark Pool
@@ -7,18 +7,23 @@ import { mainnet, sepolia, baseSepolia } from 'wagmi/chains';
  * - sepolia: Ethereum Sepolia testnet for development/testing
  * - baseSepolia: Base Sepolia testnet (Yellow Network sandbox)
  */
-export const supportedChains = [mainnet, sepolia, baseSepolia] as const;
+export const supportedChains = [base, mainnet, sepolia, baseSepolia] as const;
 
 /**
  * Default chain to use when connecting wallet
  * Uses environment variable or defaults to mainnet
  */
-export const defaultChain = baseSepolia;
+export const defaultChain = base;
 
 /**
  * Chain configuration mapping
  */
 export const chainConfig = {
+  [base.id]: {
+    name: 'Base',
+    shortName: 'BASE',
+    explorerUrl: 'https://basescan.org',
+  },
   [mainnet.id]: {
     name: 'Ethereum',
     shortName: 'ETH',

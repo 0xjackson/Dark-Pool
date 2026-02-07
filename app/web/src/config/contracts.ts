@@ -86,6 +86,7 @@ export const ROUTER_ABI = [
       { name: 'buyerOrderId', type: 'bytes32' },
       { name: 'sellerFillAmount', type: 'uint256' },
       { name: 'buyerFillAmount', type: 'uint256' },
+      { name: 'proofTimestamp', type: 'uint256' },
       { name: 'a', type: 'uint256[2]' },
       { name: 'b', type: 'uint256[2][2]' },
       { name: 'c', type: 'uint256[2]' },
