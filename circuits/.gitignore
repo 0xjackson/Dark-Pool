@@ -1,0 +1,3 @@
+# Build artifacts — regenerate with ./build.sh
+build/
+node_modules/
