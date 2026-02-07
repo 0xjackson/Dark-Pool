@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { parseUnits } from 'viem';
 import type { Token } from '@/types/trading';
@@ -61,14 +61,16 @@ export function WithdrawButton({ token, maxBalance, onSuccess }: WithdrawButtonP
   };
 
   // Reset after success
-  if (isSuccess) {
-    setTimeout(() => {
+  useEffect(() => {
+    if (!isSuccess) return;
+    const timer = setTimeout(() => {
       setAmount('');
       setShowInput(false);
       reset();
       onSuccess?.();
     }, 2000);
-  }
+    return () => clearTimeout(timer);
+  }, [isSuccess, reset, onSuccess]);
 
   if (!address) return null;
   if (CUSTODY_ADDRESS === '0x0000000000000000000000000000000000000000') return null;
