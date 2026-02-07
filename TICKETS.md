@@ -163,7 +163,7 @@ Switch commitment hash from keccak256 to Poseidon across all layers.
 
 ### PH-004: Poseidon hash utility module
 - **File:** `app/server/src/utils/poseidon.ts` (new), `app/web/src/utils/poseidon.ts` (new)
-- **Change:** Shared utility that initializes Poseidon hasher from `circomlibjs`, exposes `computeOrderHash(orderId, user, sellToken, buyToken, sellAmount, minBuyAmount, expiresAt) → bytes32`. Handles Poseidon field element → bytes32 conversion (`poseidon.F.toString(hash, 16).padStart(64, '0')`). Used by both frontend and backend.
+- **Change:** Shared utility that initializes Poseidon hasher from `circomlibjs`, exposes `computeOrderHash(orderId, user, sellToken, buyToken, sellAmount, minBuyAmount, expiresAt) → bytes32`. Uses nested two-step hash: `h1 = poseidon([orderId, user, sellToken, buyToken, sellAmount])` then `hash = poseidon([h1, minBuyAmount, expiresAt])`. Handles field element → bytes32 conversion (`poseidon.F.toString(hash, 16).padStart(64, '0')`). This nesting matches the on-chain PoseidonT6 + PoseidonT4 contracts exactly (poseidon-solidity ships T2-T6 only, not T8 for 7 inputs).
 - **Blocked by:** INF-004, INF-005
 - **Blocks:** PH-001, PH-002
 
@@ -174,7 +174,7 @@ Switch commitment hash from keccak256 to Poseidon across all layers.
 
 ### PH-006: Update revealAndSettle to use on-chain Poseidon
 - **File:** `contracts/src/DarkPoolRouter.sol`
-- **Change:** Replace `keccak256(abi.encode(seller))` with `PoseidonT8.hash([uint256(seller.orderId), uint256(uint160(seller.user)), ...])` in `revealAndSettle`. Both settlement paths now verify against the same Poseidon commitment hash. Add `SNARK_SCALAR_FIELD` constant and field bounds checks in `depositAndCommit`.
+- **Change:** Replace `keccak256(abi.encode(seller))` with nested Poseidon: `h1 = PoseidonT6.hash([orderId, user, sellToken, buyToken, sellAmount])`, `hash = PoseidonT4.hash([h1, minBuyAmount, expiresAt])`. Import PoseidonT6 and PoseidonT4 from poseidon-solidity. Both settlement paths now verify against the same Poseidon commitment hash. Add `SNARK_SCALAR_FIELD` constant and field bounds checks in `depositAndCommit`.
 - **Blocked by:** PH-005, PF-003
 - **Blocks:** T-001
 
