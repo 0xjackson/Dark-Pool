@@ -1,0 +1,5 @@
+ALTER TABLE orders DROP COLUMN IF EXISTS order_id;
+ALTER TABLE orders DROP COLUMN IF EXISTS sell_amount;
+ALTER TABLE orders DROP COLUMN IF EXISTS min_buy_amount;
+ALTER TABLE matches DROP COLUMN IF EXISTS settle_tx_hash;
+ALTER TABLE matches DROP COLUMN IF EXISTS settled_at;
