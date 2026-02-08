@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo } from 'react';
 import { motion } from 'framer-motion';
 
 /**
@@ -13,13 +14,15 @@ import { motion } from 'framer-motion';
  * - Fixed positioning behind content
  */
 export function PoolBackground() {
-  const blobs = [
+  const blobs = useMemo(() => [
     {
       id: 1,
       d: 'M60,-65C75,-55,82,-35,85,-15C88,5,86,25,78,40C70,55,56,65,40,70C24,75,6,75,-10,70C-26,65,-42,55,-55,40C-68,25,-78,5,-80,-18C-82,-41,-76,-67,-62,-77C-48,-87,-24,-81,-2,-78C20,-75,45,-75,60,-65Z',
       duration: 30,
       delay: 0,
       scale: 1.5,
+      left: `${Math.random() * 100}%`,
+      top: `${Math.random() * 100}%`,
     },
     {
       id: 2,
@@ -27,6 +30,8 @@ export function PoolBackground() {
       duration: 35,
       delay: 5,
       scale: 1.2,
+      left: `${Math.random() * 100}%`,
+      top: `${Math.random() * 100}%`,
     },
     {
       id: 3,
@@ -34,8 +39,10 @@ export function PoolBackground() {
       duration: 40,
       delay: 10,
       scale: 1.8,
+      left: `${Math.random() * 100}%`,
+      top: `${Math.random() * 100}%`,
     },
-  ];
+  ], []);
 
   return (
     <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
@@ -44,8 +51,8 @@ export function PoolBackground() {
           key={blob.id}
           className="absolute"
           style={{
-            left: `${Math.random() * 100}%`,
-            top: `${Math.random() * 100}%`,
+            left: blob.left,
+            top: blob.top,
             transform: 'translate(-50%, -50%)',
           }}
           animate={{
