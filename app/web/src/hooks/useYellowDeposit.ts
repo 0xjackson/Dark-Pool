@@ -85,8 +85,8 @@ export function useYellowDeposit(): UseYellowDepositReturn {
     try {
       const b = await getLedgerBalances(address);
       setBalances(b);
-    } catch {
-      // Silently fail — balances will show as empty
+    } catch (err) {
+      console.warn('[useYellowDeposit] refreshBalances failed:', err);
     }
   }, [address]);
 
@@ -273,8 +273,20 @@ export function useYellowDeposit(): UseYellowDepositReturn {
         });
         await publicClient.waitForTransactionReceipt({ hash: resizeHash });
 
-        // Refresh balances
-        await refreshBalances();
+        // Retry fetching balances — clearnode needs time to process the Resized event
+        const delays = [2000, 3000, 5000];
+        for (const delay of delays) {
+          await new Promise((r) => setTimeout(r, delay));
+          try {
+            const b = await getLedgerBalances(address);
+            if (b.length > 0) {
+              setBalances(b);
+              break;
+            }
+          } catch {
+            // Will retry or WS subscription / polling will catch up
+          }
+        }
 
         setStep('complete');
       } catch (err) {
