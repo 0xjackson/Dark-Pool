@@ -122,7 +122,7 @@ export function useYellowDeposit(): UseYellowDepositReturn {
         // Step 2: Create channel if needed
         if (!channel) {
           setStep('creating_channel');
-          const channelInfo = await requestCreateChannel(address, custodyToken);
+          const channelInfo = await requestCreateChannel(address, custodyToken, chain.id);
           console.log('[deposit] channelInfo from API:', JSON.stringify({ serverSignature: channelInfo.serverSignature, sigLength: channelInfo.serverSignature?.length }, null, 2));
 
           // Sign the channel initial state with MetaMask (EIP-712)
