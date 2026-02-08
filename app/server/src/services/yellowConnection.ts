@@ -719,7 +719,7 @@ export async function requestCreateChannel(
   console.log('[create_channel] clearnode response keys:', Object.keys(data));
   console.log('[create_channel] full response:', JSON.stringify(data, (_, v) => typeof v === 'bigint' ? v.toString() : v, 2));
   return {
-    channelId: data.channel_id,
+    channelId: data.channelId || data.channel_id,
     channel: {
       participants: data.channel?.participants || [],
       adjudicator: data.channel?.adjudicator || '',
@@ -729,14 +729,14 @@ export async function requestCreateChannel(
     state: {
       intent: data.state?.intent || 1,
       version: data.state?.version || 0,
-      stateData: data.state?.state_data || '0x',
+      stateData: data.state?.stateData || data.state?.state_data || '0x',
       allocations: (data.state?.allocations || []).map((a: any) => ({
         destination: a.destination || a.participant,
         token: a.token || a.token_address,
         amount: String(a.amount || '0'),
       })),
     },
-    serverSignature: data.server_signature || data.state_signature || data.signature || '',
+    serverSignature: data.serverSignature || data.server_signature || '',
   };
 }
 
@@ -774,19 +774,19 @@ export async function requestResizeChannel(
   console.log('[resize_channel] clearnode response keys:', Object.keys(data));
   console.log('[resize_channel] full response:', JSON.stringify(data, (_, v) => typeof v === 'bigint' ? v.toString() : v, 2));
   return {
-    channelId: data.channel_id,
+    channelId: data.channelId || data.channel_id,
     channel: { participants: [], adjudicator: '', challenge: 0, nonce: 0 },
     state: {
       intent: data.state?.intent || 2,
       version: data.state?.version || 0,
-      stateData: data.state?.state_data || '0x',
+      stateData: data.state?.stateData || data.state?.state_data || '0x',
       allocations: (data.state?.allocations || []).map((a: any) => ({
         destination: a.destination || a.participant,
         token: a.token || a.token_address,
         amount: String(a.amount || '0'),
       })),
     },
-    serverSignature: data.server_signature || data.state_signature || data.signature || '',
+    serverSignature: data.serverSignature || data.server_signature || '',
   };
 }
 
