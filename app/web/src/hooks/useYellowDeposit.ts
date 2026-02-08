@@ -395,19 +395,15 @@ export function useYellowDeposit(): UseYellowDepositReturn {
         console.log('[useYellowDeposit] 7️⃣ Closing channel to move funds to unified balance...');
         setStep('closing_channel');
 
-        const closeResult = await withTimeout(
-          fetch(`${API_URL}/api/channel/close`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              address,
-              channelId: channel.channelId,
-              fundsDestination: address,
-            }),
+        const closeResult = await fetch(`${API_URL}/api/channel/close`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            address,
+            channelId: channel.channelId,
+            fundsDestination: address,
           }),
-          TIMEOUTS.RPC_CALL,
-          'Failed to request channel close from clearnode'
-        );
+        });
 
         if (!closeResult.ok) {
           throw new Error(`Close channel failed: ${await closeResult.text()}`);
@@ -420,29 +416,25 @@ export function useYellowDeposit(): UseYellowDepositReturn {
         setStep('submitting_close');
         const closeSig = await signChannelState(walletClient, closeInfo, chain.id);
 
-        const closeHash = await withTimeout(
-          walletClient.writeContract({
-            address: CUSTODY_ADDRESS,
-            abi: CUSTODY_ABI,
-            functionName: 'close',
-            args: [
-              {
-                intent: closeInfo.state.intent,
-                version: BigInt(closeInfo.state.version),
-                data: (closeInfo.state.stateData || '0x') as `0x${string}`,
-                allocations: closeInfo.state.allocations.map((a: any) => ({
-                  destination: a.destination as `0x${string}`,
-                  token: a.token as `0x${string}`,
-                  amount: BigInt(a.amount),
-                })),
-                sigs: [closeSig, closeInfo.serverSignature as `0x${string}`],
-              },
-              (closeInfo.state.stateData || '0x') as `0x${string}`,
-            ],
-          }),
-          TIMEOUTS.TRANSACTION,
-          'Close transaction timed out'
-        );
+        const closeHash = await walletClient.writeContract({
+          address: CUSTODY_ADDRESS,
+          abi: CUSTODY_ABI,
+          functionName: 'close',
+          args: [
+            {
+              intent: closeInfo.state.intent,
+              version: BigInt(closeInfo.state.version),
+              data: (closeInfo.state.stateData || '0x') as `0x${string}`,
+              allocations: closeInfo.state.allocations.map((a: any) => ({
+                destination: a.destination as `0x${string}`,
+                token: a.token as `0x${string}`,
+                amount: BigInt(a.amount),
+              })),
+              sigs: [closeSig, closeInfo.serverSignature as `0x${string}`],
+            },
+            (closeInfo.state.stateData || '0x') as `0x${string}`,
+          ],
+        });
 
         console.log('[useYellowDeposit] ✓ Close tx:', closeHash);
         await publicClient.waitForTransactionReceipt({ hash: closeHash });
