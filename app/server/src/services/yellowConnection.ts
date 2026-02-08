@@ -818,12 +818,18 @@ export async function requestResizeChannel(
 
   const signer = await getUserSessionKeySigner(addr);
 
-  const msg = await createResizeChannelMessage(signer, {
+  // CRITICAL: omit allocate_amount when it's '0' — passing 0n cancels out DeltaAllocations
+  // The clearnode only credits unified balance when DeltaAllocations[0] > 0
+  const resizeParams: any = {
     channel_id: channelId as `0x${string}`,
     resize_amount: BigInt(resizeAmount),
-    allocate_amount: BigInt(allocateAmount),
     funds_destination: addr,
-  });
+  };
+  if (allocateAmount !== '0' && allocateAmount !== '') {
+    resizeParams.allocate_amount = BigInt(allocateAmount);
+  }
+
+  const msg = await createResizeChannelMessage(signer, resizeParams);
 
   const raw = await sendAndWait(ws, msg);
   const parsed = parseAnyRPCResponse(raw);
