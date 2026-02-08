@@ -123,6 +123,7 @@ export function useYellowDeposit(): UseYellowDepositReturn {
         if (!channel) {
           setStep('creating_channel');
           const channelInfo = await requestCreateChannel(address, custodyToken);
+          console.log('[deposit] channelInfo from API:', JSON.stringify({ serverSignature: channelInfo.serverSignature, sigLength: channelInfo.serverSignature?.length }, null, 2));
 
           // Sign the channel initial state with MetaMask (EIP-712)
           setStep('signing_channel_state');
@@ -135,6 +136,7 @@ export function useYellowDeposit(): UseYellowDepositReturn {
 
           // Submit Custody.create() on-chain
           setStep('submitting_create');
+          console.log('[deposit] sigs being sent to create():', { userSig, serverSig: channelInfo.serverSignature, serverSigType: typeof channelInfo.serverSignature });
           const createHash = await walletClient.writeContract({
             address: CUSTODY_ADDRESS,
             abi: CUSTODY_ABI,
