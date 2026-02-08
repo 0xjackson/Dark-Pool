@@ -48,6 +48,7 @@ export function OrderTypeToggle({ value, onChange }: OrderTypeToggleProps) {
             {value === option && (
               <motion.div
                 layoutId="activeToggle"
+                initial={false}
                 className="absolute inset-0 bg-purple-primary rounded-md"
                 transition={{
                   type: 'spring',

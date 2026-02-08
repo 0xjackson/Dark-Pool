@@ -53,7 +53,7 @@ export function Modal({ isOpen, onClose, children, title }: ModalProps) {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="absolute inset-0 bg-dark-bg/80 backdrop-blur-xl"
+            className="absolute inset-0 bg-dark-bg/60 backdrop-blur-sm"
             onClick={onClose}
           />
 
