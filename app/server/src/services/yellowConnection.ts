@@ -895,8 +895,8 @@ export async function getLedgerBalances(
   }
 
   const data = parsed.params as any;
-  const ledgerBalances = data.ledger_balances || [];
-  console.log(`[getLedgerBalances] ledger_balances field:`, JSON.stringify(ledgerBalances));
+  const ledgerBalances = data.ledgerBalances || [];  // SDK converts to camelCase!
+  console.log(`[getLedgerBalances] ledgerBalances field:`, JSON.stringify(ledgerBalances));
 
   const result = ledgerBalances.map((b: any) => ({
     asset: b.asset,
