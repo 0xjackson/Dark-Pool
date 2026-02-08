@@ -304,7 +304,7 @@ export function useYellowDeposit(): UseYellowDepositReturn {
           '0', // allocate_amount must be 0 — see DEPOSIT_INVESTIGATION.md
         );
         console.log('[useYellowDeposit] Resize response:', {
-          channelId: resizeInfo.channel_id,
+          channelId: resizeInfo.channelId,
           intent: resizeInfo.state.intent,
           version: resizeInfo.state.version,
           allocations: resizeInfo.state.allocations,
