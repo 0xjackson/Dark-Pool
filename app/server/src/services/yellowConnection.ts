@@ -776,7 +776,9 @@ export async function requestCreateChannel(
 
   console.log('[requestCreateChannel] Parsed method:', parsed.method);
   const data = parsed.params as any;
-  console.log('[requestCreateChannel] Parsed params:', JSON.stringify(data, null, 2).substring(0, 1000));
+  console.log('[requestCreateChannel] Parsed params:', JSON.stringify(data, (key, value) =>
+    typeof value === 'bigint' ? value.toString() : value, 2
+  ).substring(0, 1000));
 
   // SDK's parseAnyRPCResponse transforms snake_case → camelCase,
   // so use camelCase fields (serverSignature, channelId, stateData).
