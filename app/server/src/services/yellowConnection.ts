@@ -717,7 +717,7 @@ export async function requestCreateChannel(
 
   const data = parsed.params as any;
   console.log('[create_channel] clearnode response keys:', Object.keys(data));
-  console.log('[create_channel] full response:', JSON.stringify(data, null, 2));
+  console.log('[create_channel] full response:', JSON.stringify(data, (_, v) => typeof v === 'bigint' ? v.toString() : v, 2));
   return {
     channelId: data.channel_id,
     channel: {
@@ -772,7 +772,7 @@ export async function requestResizeChannel(
 
   const data = parsed.params as any;
   console.log('[resize_channel] clearnode response keys:', Object.keys(data));
-  console.log('[resize_channel] full response:', JSON.stringify(data, null, 2));
+  console.log('[resize_channel] full response:', JSON.stringify(data, (_, v) => typeof v === 'bigint' ? v.toString() : v, 2));
   return {
     channelId: data.channel_id,
     channel: { participants: [], adjudicator: '', challenge: 0, nonce: 0 },
