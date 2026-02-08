@@ -1,6 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'standalone',
+  images: {
+    unoptimized: true,
+  },
   // Enable polling for Docker file watching
   webpack: (config, { isServer }) => {
     if (!isServer) {
