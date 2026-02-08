@@ -180,7 +180,8 @@ export function useYellowDeposit(): UseYellowDepositReturn {
             args: [channel.channelId as `0x${string}`],
           });
           // getChannelData returns [channel, status, wallets, challengeExpiry, lastValidState]
-          const lastValidState = (channelData as any[])[4];
+          // Destructure the tuple to avoid readonly cast issues
+          const [, , , , lastValidState] = channelData;
           precedingIntent = Number(lastValidState.intent);
           precedingVersion = BigInt(lastValidState.version);
           precedingStateData = lastValidState.data as `0x${string}`;
