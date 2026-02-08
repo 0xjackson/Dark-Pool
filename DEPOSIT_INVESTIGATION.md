@@ -825,14 +825,594 @@ This bypasses the UI entirely and works reliably. Use this if deposit flow can't
 
 ---
 
+## WALLET A DEBUGGING SESSION (After Compact - Feb 8, 2026)
+
+### Overview
+
+This section provides a **complete debugging plan** for Wallet A with extensive logging to identify the root cause of stuck "resizing" channels. Every step is instrumented with console.log statements to capture exactly what's happening.
+
+### Wallet A Details
+
+```
+Address:     0x71a1AbDF45228A1b23B9986044aE787d17904413
+Private Key: 0x619aaf81ae957089cf96e6bfeb39d1639b3782d777a1ae51c2683d427f918642
+Chain:       Base Mainnet (8453)
+Token:       USDC (0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913)
+```
+
+### Current State
+
+**Check current channels:**
+```bash
+node check-wallet-a-channels.js
+```
+
+Expected: 1-2 channels, at least one stuck in "resizing" with amt=0
+
+### Key Differences: Yellow Example vs Our Implementation
+
+| Aspect | Yellow Example (Sepolia) | Our Implementation (Base) |
+|--------|-------------------------|---------------------------|
+| Network | Sepolia testnet (11155111) | Base mainnet (8453) |
+| Clearnode | wss://clearnet-sandbox.yellow.com/ws | wss://clearnet.yellow.com/ws |
+| Token | ytest.usd (0x1c7D...) | USDC (0x8335...) |
+| Adjudicator | 0x7c7ccbc98469190849BCC6c926307794fDfB11F2 | 0x7de4A0736Cf5740fD3Ca2F2e9cc85c9AC223eF0C |
+| Custody | 0x019B65A265EB3363822f2752141b3dF16131b262 | 0x490fb189DdE3a01B00be9BA5F41e3447FbC838b6 |
+| Challenge | 3600 (1 hour) | 3600 (1 hour) |
+
+**Critical Questions:**
+1. Is the Base mainnet adjudicator address correct?
+2. Does Base custody contract match Sepolia's ABI?
+3. Are we encoding channel/state correctly for Base?
+
+### Step-by-Step Debugging Script
+
+Create `debug-wallet-a-deposit.js` with extensive logging:
+
+```javascript
+const { createPublicClient, createWalletClient, http, keccak256, encodeAbiParameters } = require('viem');
+const { base } = require('viem/chains');
+const { privateKeyToAccount, generatePrivateKey } = require('viem/accounts');
+const WebSocket = require('ws');
+const {
+  createECDSAMessageSigner,
+  createEIP712AuthMessageSigner,
+  createAuthRequestMessage,
+  createAuthVerifyMessageFromChallenge,
+  createCreateChannelMessage,
+  createResizeChannelMessage,
+  NitroliteClient,
+  WalletStateSigner
+} = require('@erc7824/nitrolite');
+
+// Wallet A credentials
+const WALLET_A_PK = '0x619aaf81ae957089cf96e6bfeb39d1639b3782d777a1ae51c2683d427f918642';
+const WALLET_A_ADDR = '0x71a1AbDF45228A1b23B9986044aE787d17904413';
+
+// Base mainnet addresses
+const CUSTODY = '0x490fb189DdE3a01B00be9BA5F41e3447FbC838b6';
+const ADJUDICATOR = '0x7de4A0736Cf5740fD3Ca2F2e9cc85c9AC223eF0C';
+const USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
+const BROKER = '0x435d4B6b68e1083Cc0835D1F971C4739204C1d2a';
+const WS_URL = 'wss://clearnet.yellow.com/ws'; // PRODUCTION, not sandbox
+
+console.log('═══════════════════════════════════════════════════════');
+console.log('  WALLET A DEPOSIT DEBUG - Base Mainnet');
+console.log('═══════════════════════════════════════════════════════\n');
+
+async function main() {
+  // Setup viem clients
+  const account = privateKeyToAccount(WALLET_A_PK);
+  const publicClient = createPublicClient({
+    chain: base,
+    transport: http('https://mainnet.base.org'),
+  });
+  const walletClient = createWalletClient({
+    account,
+    chain: base,
+    transport: http('https://mainnet.base.org'),
+  });
+
+  console.log('✓ Clients initialized');
+  console.log(`  Wallet: ${account.address}`);
+  console.log(`  Chain: Base (${base.id})`);
+  console.log(`  Token: USDC (${USDC})\n`);
+
+  // Initialize Nitrolite client for on-chain operations
+  const client = new NitroliteClient({
+    publicClient,
+    walletClient,
+    stateSigner: new WalletStateSigner(walletClient),
+    addresses: {
+      custody: CUSTODY,
+      adjudicator: ADJUDICATOR,
+    },
+    chainId: base.id,
+    challengeDuration: 3600n,
+  });
+
+  // STEP 1: Check current on-chain custody balance
+  console.log('━━━ STEP 1: Check Current Custody Balance ━━━');
+  try {
+    const balances = await publicClient.readContract({
+      address: CUSTODY,
+      abi: [{
+        type: 'function',
+        name: 'getAccountsBalances',
+        inputs: [
+          { name: 'users', type: 'address[]' },
+          { name: 'tokens', type: 'address[]' }
+        ],
+        outputs: [{ type: 'uint256[]' }],
+        stateMutability: 'view'
+      }],
+      functionName: 'getAccountsBalances',
+      args: [[WALLET_A_ADDR], [USDC]],
+    });
+    console.log(`✓ Current Custody Balance: ${balances[0]} (${Number(balances[0]) / 1e6} USDC)`);
+  } catch (e) {
+    console.error('✗ Failed to check custody balance:', e.message);
+  }
+  console.log('');
+
+  // STEP 2: Connect to Clearnode WebSocket
+  console.log('━━━ STEP 2: Connect to Clearnode ━━━');
+  const ws = new WebSocket(WS_URL);
+  await new Promise((resolve, reject) => {
+    ws.on('open', () => {
+      console.log('✓ WebSocket connected to clearnet.yellow.com');
+      resolve();
+    });
+    ws.on('error', reject);
+  });
+  console.log('');
+
+  // STEP 3: Generate session key and authenticate
+  console.log('━━━ STEP 3: Authenticate with Session Key ━━━');
+  const sessionPrivateKey = generatePrivateKey();
+  const sessionAccount = privateKeyToAccount(sessionPrivateKey);
+  const sessionSigner = createECDSAMessageSigner(sessionPrivateKey);
+
+  console.log(`  Session Key Generated: ${sessionAccount.address}`);
+
+  const authParams = {
+    session_key: sessionAccount.address,
+    allowances: [{ asset: 'usdc', amount: '1000000000' }], // Use 'usdc' symbol, not address
+    expires_at: BigInt(Math.floor(Date.now() / 1000) + 86400), // 24 hours
+    scope: 'dark-pool',
+  };
+
+  const authRequestMsg = await createAuthRequestMessage({
+    address: WALLET_A_ADDR,
+    application: 'Dark Pool',
+    ...authParams
+  });
+
+  ws.send(authRequestMsg);
+  console.log('✓ Sent auth_request');
+
+  // Wait for auth_challenge
+  let authenticated = false;
+  ws.on('message', async (data) => {
+    const response = JSON.parse(data.toString());
+    console.log(`\n[WS] Received: ${response.res?.[1] || 'error'}`);
+    console.log(`[WS] Full response:`, JSON.stringify(response, null, 2));
+
+    if (response.res && response.res[1] === 'auth_challenge') {
+      console.log('\n━━━ STEP 4: Sign Auth Challenge ━━━');
+      const challenge = response.res[2].challenge_message;
+      console.log(`  Challenge: ${challenge.substring(0, 50)}...`);
+
+      const signer = createEIP712AuthMessageSigner(
+        walletClient,
+        authParams,
+        { name: 'Dark Pool' }
+      );
+
+      const verifyMsg = await createAuthVerifyMessageFromChallenge(signer, challenge);
+      ws.send(verifyMsg);
+      console.log('✓ Sent auth_verify with EIP-712 signature\n');
+    }
+
+    if (response.res && response.res[1] === 'auth_verify') {
+      authenticated = true;
+      console.log('✓ AUTHENTICATED');
+      console.log(`  Session key: ${response.res[2].session_key}`);
+      console.log(`  JWT token: ${response.res[2].jwt ? 'Received' : 'Missing'}\n`);
+
+      // STEP 5: Request channel creation
+      console.log('━━━ STEP 5: Request Channel Creation ━━━');
+      console.log(`  Token: ${USDC}`);
+      console.log(`  Chain: ${base.id}\n`);
+
+      const createChannelMsg = await createCreateChannelMessage(
+        sessionSigner,
+        {
+          chain_id: base.id,
+          token: USDC,
+        }
+      );
+      ws.send(createChannelMsg);
+      console.log('✓ Sent create_channel request\n');
+    }
+
+    if (response.res && response.res[1] === 'create_channel') {
+      console.log('━━━ STEP 6: Received Channel Creation Response ━━━');
+      const { channel_id, channel, state, server_signature } = response.res[2];
+
+      console.log('Channel Config:');
+      console.log(`  ID: ${channel_id}`);
+      console.log(`  Participants: ${JSON.stringify(channel.participants)}`);
+      console.log(`  Adjudicator: ${channel.adjudicator}`);
+      console.log(`  Challenge: ${channel.challenge_duration}`);
+      console.log(`  Nonce: ${channel.nonce}\n`);
+
+      console.log('Initial State:');
+      console.log(`  Intent: ${state.intent} (should be 1 = INITIALIZE)`);
+      console.log(`  Version: ${state.version} (should be 0)`);
+      console.log(`  Data: ${state.state_data}`);
+      console.log(`  Allocations: ${JSON.stringify(state.allocations, null, 2)}`);
+      console.log(`  Server Signature: ${server_signature.substring(0, 20)}...\n`);
+
+      // Verify channel ID computation
+      console.log('━━━ STEP 7: Verify Channel ID Computation ━━━');
+      const computedChannelId = keccak256(
+        encodeAbiParameters(
+          [
+            { name: 'participants', type: 'address[]' },
+            { name: 'adjudicator', type: 'address' },
+            { name: 'challenge', type: 'uint64' },
+            { name: 'nonce', type: 'uint64' }
+          ],
+          [
+            channel.participants,
+            channel.adjudicator,
+            BigInt(channel.challenge_duration),
+            BigInt(channel.nonce)
+          ]
+        )
+      );
+      console.log(`  Computed: ${computedChannelId}`);
+      console.log(`  Clearnode: ${channel_id}`);
+      console.log(`  Match: ${computedChannelId === channel_id ? '✓ YES' : '✗ NO'}\n`);
+
+      // CRITICAL: Check adjudicator address
+      console.log('━━━ STEP 8: Verify Adjudicator Contract ━━━');
+      try {
+        const code = await publicClient.getBytecode({ address: channel.adjudicator });
+        if (code && code !== '0x') {
+          console.log(`✓ Adjudicator contract exists at ${channel.adjudicator}`);
+          console.log(`  Bytecode length: ${code.length} bytes\n`);
+        } else {
+          console.error(`✗ NO CONTRACT at adjudicator address ${channel.adjudicator}!`);
+          console.error(`  This will cause create() to REVERT!\n`);
+          process.exit(1);
+        }
+      } catch (e) {
+        console.error(`✗ Error checking adjudicator:`, e.message, '\n');
+        process.exit(1);
+      }
+
+      // Transform state for Nitrolite SDK
+      const unsignedInitialState = {
+        intent: state.intent,
+        version: BigInt(state.version),
+        data: state.state_data,
+        allocations: state.allocations.map(a => ({
+          destination: a.destination,
+          token: a.token,
+          amount: BigInt(a.amount),
+        })),
+      };
+
+      console.log('━━━ STEP 9: Simulate create() Transaction ━━━');
+      console.log('  Attempting gas estimation...\n');
+
+      try {
+        // Try to simulate the transaction first
+        const gas = await publicClient.estimateContractGas({
+          address: CUSTODY,
+          abi: client.custodyAbi, // Use Nitrolite's ABI
+          functionName: 'create',
+          args: [channel, unsignedInitialState],
+          account: WALLET_A_ADDR,
+        });
+        console.log(`✓ Gas estimation succeeded: ${gas}`);
+        console.log(`  This means the transaction SHOULD work!\n`);
+      } catch (e) {
+        console.error('✗ Gas estimation FAILED:');
+        console.error(`  ${e.message}\n`);
+        console.error('  This is why MetaMask says "likely to fail"!\n');
+
+        // Try to extract revert reason
+        if (e.data) {
+          console.error('  Revert data:', e.data);
+        }
+
+        console.log('\n━━━ DIAGNOSIS ━━━');
+        console.log('Possible causes:');
+        console.log('1. Channel with this nonce already exists on-chain');
+        console.log('2. Invalid signatures (check EIP-191 encoding)');
+        console.log('3. Wrong adjudicator address for Base mainnet');
+        console.log('4. Participant addresses mismatch');
+        console.log('5. Challenge duration not supported\n');
+
+        process.exit(1);
+      }
+
+      console.log('━━━ STEP 10: Submit create() On-Chain ━━━');
+      console.log('  Calling Custody.create()...\n');
+
+      try {
+        const result = await client.createChannel({
+          channel,
+          unsignedInitialState,
+          serverSignature: server_signature,
+        });
+
+        const txHash = typeof result === 'string' ? result : result.txHash;
+        console.log(`✓ Transaction submitted: ${txHash}`);
+        console.log('  Waiting for confirmation...\n');
+
+        const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+        console.log(`✓ Transaction confirmed in block ${receipt.blockNumber}`);
+        console.log(`  Status: ${receipt.status === 'success' ? 'SUCCESS' : 'REVERTED'}\n`);
+
+        if (receipt.status !== 'success') {
+          console.error('✗ Transaction REVERTED on-chain!');
+          console.error('  Check Base block explorer for revert reason\n');
+          process.exit(1);
+        }
+
+        // Wait for clearnode to index the channel
+        console.log('━━━ STEP 11: Wait for Clearnode Indexing ━━━');
+        console.log('  Waiting 5 seconds for clearnode to process Created event...\n');
+        await new Promise(r => setTimeout(r, 5000));
+
+        // Now try resize
+        console.log('━━━ STEP 12: Request Resize (Fund Channel) ━━━');
+        const resizeAmount = 5000n; // 0.005 USDC (6 decimals)
+        console.log(`  Amount: ${resizeAmount} (${Number(resizeAmount) / 1e6} USDC)`);
+        console.log(`  Using ONLY allocate_amount (NOT resize_amount)\n`);
+
+        const resizeMsg = await createResizeChannelMessage(
+          sessionSigner,
+          {
+            channel_id: channel_id,
+            allocate_amount: resizeAmount,
+            funds_destination: WALLET_A_ADDR,
+          }
+        );
+        ws.send(resizeMsg);
+        console.log('✓ Sent resize_channel request\n');
+
+      } catch (e) {
+        console.error('✗ create() transaction FAILED:');
+        console.error(`  ${e.message}\n`);
+        process.exit(1);
+      }
+    }
+
+    if (response.res && response.res[1] === 'resize_channel') {
+      console.log('━━━ STEP 13: Received Resize Response ━━━');
+      const { channel_id, state, server_signature } = response.res[2];
+
+      console.log('Resize State:');
+      console.log(`  Intent: ${state.intent} (should be 2 = RESIZE)`);
+      console.log(`  Version: ${state.version}`);
+      console.log(`  Allocations: ${JSON.stringify(state.allocations, null, 2)}\n`);
+
+      const resizeState = {
+        intent: state.intent,
+        version: BigInt(state.version),
+        data: state.state_data || state.data,
+        allocations: state.allocations.map(a => ({
+          destination: a.destination,
+          token: a.token,
+          amount: BigInt(a.amount),
+        })),
+        channelId: channel_id,
+        serverSignature: server_signature,
+      };
+
+      // Get preceding state proof
+      console.log('━━━ STEP 14: Fetch Preceding State ━━━');
+      try {
+        const onChainData = await client.getChannelData(channel_id);
+        console.log('✓ Fetched on-chain channel data');
+        console.log(`  Status: ${onChainData.status}`);
+        console.log(`  Last valid state version: ${onChainData.lastValidState.version}\n`);
+
+        console.log('━━━ STEP 15: Submit resize() On-Chain ━━━');
+        const { txHash } = await client.resizeChannel({
+          resizeState,
+          proofStates: [onChainData.lastValidState],
+        });
+
+        console.log(`✓ Resize transaction submitted: ${txHash}`);
+        console.log('  Waiting for confirmation...\n');
+
+        const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+        console.log(`✓ Resize confirmed in block ${receipt.blockNumber}\n`);
+
+        // Check unified balance
+        console.log('━━━ STEP 16: Verify Unified Balance Credited ━━━');
+        console.log('  Waiting 3 seconds for clearnode to process...\n');
+        await new Promise(r => setTimeout(r, 3000));
+
+        // Query via get_ledger_balances
+        // (This requires a separate user WS connection - skipping for now)
+        console.log('✓ DEPOSIT FLOW COMPLETE');
+        console.log('\nNext: Check unified balance via UI or backend API\n');
+
+        process.exit(0);
+
+      } catch (e) {
+        console.error('✗ resize() failed:');
+        console.error(`  ${e.message}\n`);
+        process.exit(1);
+      }
+    }
+
+    if (response.error) {
+      console.error('✗ Clearnode Error:', response.error);
+      process.exit(1);
+    }
+  });
+}
+
+main().catch(err => {
+  console.error('\n✗ FATAL ERROR:', err);
+  process.exit(1);
+});
+```
+
+### Running the Debug Script
+
+```bash
+# Install dependencies if needed
+cd /Users/jacks/dark-pool
+npm install --prefix app/server ws viem @erc7824/nitrolite
+
+# Run the comprehensive debug script
+node debug-wallet-a-deposit.js > wallet-a-debug.log 2>&1
+
+# Review the full log
+cat wallet-a-debug.log
+```
+
+### Expected Output Analysis
+
+**If create() fails at gas estimation:**
+```
+✗ Gas estimation FAILED:
+  execution reverted: <ACTUAL REASON>
+```
+
+Look for these specific errors:
+- `ChannelAlreadyExists` → Nonce collision
+- `InvalidSignature` → EIP-191 encoding issue
+- `InvalidAdjudicator` → Wrong adjudicator for Base
+- `ChallengeOutOfRange` → Challenge duration issue
+
+**If create() succeeds but resize() fails:**
+- Check if clearnode indexed the channel (step 11)
+- Verify on-chain channel status is ACTIVE (not INITIAL)
+- Check preceding state proof construction
+
+**If everything succeeds but unified balance = 0:**
+- Verify we're using ONLY `allocate_amount` (NOT resize_amount)
+- Check clearnode logs for handleResized event
+- Confirm deltaAllocations[0] > 0 in Resized event
+
+### Key Logging Points in Frontend
+
+Add these logs to `app/web/src/hooks/useYellowDeposit.ts`:
+
+```typescript
+// Line 115 - Start of deposit flow
+console.log('[useYellowDeposit] Starting deposit', {
+  amount,
+  token,
+  address,
+  sessionKeyActive
+});
+
+// Line 122 - After requestCreateChannel
+console.log('[useYellowDeposit] Channel creation response', {
+  channelId: channelInfo.channel_id,
+  participants: channelInfo.channel.participants,
+  adjudicator: channelInfo.channel.adjudicator,
+  challenge: channelInfo.channel.challenge_duration,
+  nonce: channelInfo.channel.nonce,
+});
+
+// Line 141 - Before Custody.create()
+console.log('[useYellowDeposit] Submitting create() transaction', {
+  custody: CUSTODY_ADDRESS,
+  channelId,
+  participants: channelInfo.channel.participants,
+  allocations: channelInfo.state.allocations,
+});
+
+// Line 165 - After create() confirmation
+console.log('[useYellowDeposit] create() confirmed', {
+  txHash: createHash,
+  blockNumber: receipt.blockNumber,
+  gasUsed: receipt.gasUsed,
+});
+
+// Line 258 - Before Custody.resize()
+console.log('[useYellowDeposit] Submitting resize() transaction', {
+  channelId: channel.channelId,
+  resizeAmount: amountWei,
+  precedingVersion: initialStateData.version,
+  hasPrecedingSigs: initialStateSigs.length,
+});
+
+// Line 287 - After resize() confirmation
+console.log('[useYellowDeposit] resize() confirmed', {
+  txHash: resizeHash,
+  blockNumber: resizeReceipt.blockNumber,
+});
+```
+
+### Comparison with Working Example
+
+The Yellow Network example that WORKS uses:
+
+1. **Implicit Join** - Both signatures in create() to skip INITIAL → ACTIVE directly
+2. **5-second wait** after create() before querying channels
+3. **ONLY allocate_amount** for funding (NOT resize_amount)
+4. **Polling** for custody balance changes (not fixed delay)
+
+Our implementation should match this pattern EXACTLY.
+
+### Critical Checklist
+
+Before running any deposit:
+
+- [ ] Verify adjudicator exists at 0x7de4A0736Cf5740fD3Ca2F2e9cc85c9AC223eF0C on Base
+- [ ] Confirm custody contract is 0x490fb189DdE3a01B00be9BA5F41e3447FbC838b6
+- [ ] Check no existing channels for this wallet+token combo
+- [ ] Verify session key is active and has allowance for 'usdc'
+- [ ] Use production clearnode (wss://clearnet.yellow.com/ws)
+- [ ] Fund wallet with at least 0.002 ETH for gas + 0.01 USDC
+
+### Next Steps After Debug Script
+
+1. **If create() fails:**
+   - Copy exact error message
+   - Use cast to decode revert reason
+   - Check Base block explorer for similar transactions
+   - Verify all addresses with Yellow team
+
+2. **If create() succeeds but resize() fails:**
+   - Check channel status on-chain
+   - Verify clearnode indexed the Created event
+   - Compare state encoding with Yellow example
+
+3. **If resize() succeeds but no unified balance:**
+   - Confirm we omitted `resize_amount` field
+   - Check Resized event deltaAllocations
+   - Query clearnode custody.go:448-461 logic
+
+4. **If everything succeeds:**
+   - Document exact parameters that worked
+   - Update frontend to match
+   - Test with Wallets B, C, D
+
+---
+
 ## Next Session Action Items
 
-1. ✅ Read this entire section
-2. Run **Step 1** (capture revert reason with cast)
-3. Run **Test 1** with fresh Wallet E + full logging
-4. If still fails, run **Test 2** (manual script)
-5. Implement fixes from **Specific Bugs** section
-6. Deploy and test with **Test 3**
-7. Document findings in new section below
+1. ✅ Read the Wallet A debugging section above
+2. Run `debug-wallet-a-deposit.js` and save full output to `wallet-a-debug.log`
+3. Analyze the exact point of failure (gas estimation or transaction revert)
+4. If adjudicator address is wrong, find correct one for Base mainnet
+5. Compare with working Yellow example line-by-line
+6. Fix identified issue in frontend code
+7. Re-test with fresh deposit
+8. Document findings in new section below
 
 ---

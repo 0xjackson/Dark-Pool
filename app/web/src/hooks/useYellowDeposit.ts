@@ -98,12 +98,34 @@ export function useYellowDeposit(): UseYellowDepositReturn {
         const custodyToken = isNativeETH ? zeroAddress : (token as `0x${string}`);
         const rawAmount = parseUnits(amount, decimals);
 
+        console.log('[useYellowDeposit] ═══ STARTING DEPOSIT ═══');
+        console.log('[useYellowDeposit] Token:', token);
+        console.log('[useYellowDeposit] Custody token:', custodyToken);
+        console.log('[useYellowDeposit] Amount:', amount, 'decimals:', decimals);
+        console.log('[useYellowDeposit] Raw amount:', rawAmount.toString());
+        console.log('[useYellowDeposit] User:', address);
+        console.log('[useYellowDeposit] Chain:', chain.id);
+
         // Step 1: Check if user has a channel for this token
         setStep('checking_channel');
+        console.log('[useYellowDeposit] 1️⃣ Fetching channels...');
         let channels = await getChannels(address);
+        console.log('[useYellowDeposit] Got', channels.length, 'channel(s):', JSON.stringify(channels, null, 2));
+
         let channel = channels.find(
           (ch) => ch.token?.toLowerCase() === custodyToken.toLowerCase() && ch.status === 'open'
         );
+        console.log('[useYellowDeposit] Found matching channel:', channel ? 'YES' : 'NO');
+        if (channel) {
+          console.log('[useYellowDeposit] Channel details:', JSON.stringify(channel, null, 2));
+        } else {
+          console.log('[useYellowDeposit] No open channel for token', custodyToken);
+          console.log('[useYellowDeposit] All channels:', channels.map(ch => ({
+            id: ch.channelId?.substring(0, 20) + '...',
+            token: ch.token,
+            status: ch.status,
+          })));
+        }
 
         // Save preceding state for the resize proof (adjudicator requires it)
         let precedingStateSigs: `0x${string}`[] = [];
@@ -114,8 +136,16 @@ export function useYellowDeposit(): UseYellowDepositReturn {
 
         // Step 2: Create channel if needed, OR fetch existing state
         if (!channel) {
+          console.log('[useYellowDeposit] 2️⃣ No channel exists, creating new one...');
           setStep('creating_channel');
+          console.log('[useYellowDeposit] Requesting channel creation from clearnode...');
           const channelInfo = await requestCreateChannel(address, custodyToken, chain.id);
+          console.log('[useYellowDeposit] Channel creation response:', {
+            channelId: channelInfo.channel_id,
+            participants: channelInfo.channel.participants,
+            adjudicator: channelInfo.channel.adjudicator,
+            nonce: channelInfo.channel.nonce,
+          });
 
           // Sign the channel initial state with EIP-191 (personal_sign)
           setStep('signing_channel_state');
@@ -138,6 +168,20 @@ export function useYellowDeposit(): UseYellowDepositReturn {
 
           // Submit Custody.create() on-chain
           setStep('submitting_create');
+          console.log('[useYellowDeposit] 3️⃣ Submitting Custody.create() on-chain...');
+          console.log('[useYellowDeposit] Channel params:', {
+            participants: channelInfo.channel.participants,
+            adjudicator: channelInfo.channel.adjudicator,
+            challenge: channelInfo.channel.challenge,
+            nonce: channelInfo.channel.nonce,
+          });
+          console.log('[useYellowDeposit] Initial state:', {
+            intent: channelInfo.state.intent,
+            version: channelInfo.state.version,
+            allocations: precedingAllocations,
+            sigsCount: precedingStateSigs.length,
+          });
+
           const createHash = await walletClient.writeContract({
             address: CUSTODY_ADDRESS,
             abi: CUSTODY_ABI,
@@ -158,21 +202,29 @@ export function useYellowDeposit(): UseYellowDepositReturn {
               },
             ],
           });
+          console.log('[useYellowDeposit] ✓ Transaction submitted:', createHash);
           await publicClient.waitForTransactionReceipt({ hash: createHash });
+          console.log('[useYellowDeposit] ✓ Transaction confirmed');
 
           // Refresh channels to get the new channel ID
           // Give the clearnode a moment to process the Created event
+          console.log('[useYellowDeposit] Waiting 3s for clearnode to index Created event...');
           await new Promise((r) => setTimeout(r, 3000));
+          console.log('[useYellowDeposit] Refreshing channels...');
           channels = await getChannels(address);
           channel = channels.find(
             (ch) => ch.token?.toLowerCase() === custodyToken.toLowerCase() && ch.status === 'open'
           );
 
           if (!channel) {
+            console.error('[useYellowDeposit] ✗ Channel not found after create. Channels:', channels);
             throw new Error('Channel created but not yet visible. Please retry in a few seconds.');
           }
+          console.log('[useYellowDeposit] ✓ Channel found after create:', channel.channelId);
         } else {
+          console.log('[useYellowDeposit] 2️⃣ Using EXISTING channel:', channel.channelId);
           // Existing channel — read lastValidState from contract via getChannelData
+          console.log('[useYellowDeposit] Reading on-chain channel state...');
           const channelData = await publicClient.readContract({
             address: CUSTODY_ADDRESS,
             abi: CUSTODY_ABI,
@@ -191,9 +243,16 @@ export function useYellowDeposit(): UseYellowDepositReturn {
             amount: BigInt(a.amount),
           }));
           precedingStateSigs = lastValidState.sigs as `0x${string}`[];
+          console.log('[useYellowDeposit] ✓ Fetched preceding state from contract:', {
+            intent: precedingIntent,
+            version: precedingVersion.toString(),
+            allocationsCount: precedingAllocations.length,
+            sigsCount: precedingStateSigs.length,
+          });
         }
 
         // Step 3: Deposit to Custody on-chain
+        console.log('[useYellowDeposit] 3️⃣ Depositing to Custody contract...');
         if (!isNativeETH) {
           // ERC-20: approve if needed
           const allowance = await publicClient.readContract({
@@ -202,7 +261,9 @@ export function useYellowDeposit(): UseYellowDepositReturn {
             functionName: 'allowance',
             args: [address, CUSTODY_ADDRESS],
           });
+          console.log('[useYellowDeposit] Current allowance:', (allowance as bigint).toString());
           if ((allowance as bigint) < rawAmount) {
+            console.log('[useYellowDeposit] Approving token spend...');
             setStep('approving_token');
             const approveHash = await walletClient.writeContract({
               address: token as `0x${string}`,
@@ -210,11 +271,14 @@ export function useYellowDeposit(): UseYellowDepositReturn {
               functionName: 'approve',
               args: [CUSTODY_ADDRESS, maxUint256],
             });
+            console.log('[useYellowDeposit] ✓ Approval tx:', approveHash);
             await publicClient.waitForTransactionReceipt({ hash: approveHash });
+            console.log('[useYellowDeposit] ✓ Approval confirmed');
           }
         }
 
         setStep('depositing');
+        console.log('[useYellowDeposit] Calling Custody.deposit()...');
         const depositHash = await walletClient.writeContract({
           address: CUSTODY_ADDRESS,
           abi: CUSTODY_ABI,
@@ -222,13 +286,16 @@ export function useYellowDeposit(): UseYellowDepositReturn {
           args: [address, custodyToken, rawAmount],
           value: isNativeETH ? rawAmount : 0n,
         });
+        console.log('[useYellowDeposit] ✓ Deposit tx:', depositHash);
         await publicClient.waitForTransactionReceipt({ hash: depositHash });
+        console.log('[useYellowDeposit] ✓ Deposit confirmed');
 
         // Step 4: Resize channel to move funds from Custody ledger → unified balance
         // resize_amount = +rawAmount ONLY (pull from custody ledger into channel on-chain)
         // The clearnode's handleResized auto-credits the unified balance when
         // DeltaAllocations[0] > 0. Using allocate_amount=-X would cancel out
         // the delta to zero, preventing the credit.
+        console.log('[useYellowDeposit] 4️⃣ Requesting channel resize from clearnode...');
         setStep('requesting_resize');
         const resizeInfo = await requestResizeChannel(
           address,
@@ -236,17 +303,26 @@ export function useYellowDeposit(): UseYellowDepositReturn {
           rawAmount.toString(),
           '0', // allocate_amount must be 0 — see DEPOSIT_INVESTIGATION.md
         );
+        console.log('[useYellowDeposit] Resize response:', {
+          channelId: resizeInfo.channel_id,
+          intent: resizeInfo.state.intent,
+          version: resizeInfo.state.version,
+          allocations: resizeInfo.state.allocations,
+        });
 
         // Sign the resize state
         setStep('signing_resize_state');
+        console.log('[useYellowDeposit] Signing resize state...');
         const resizeSig = await signChannelState(
           walletClient,
           resizeInfo,
           chain.id,
         );
+        console.log('[useYellowDeposit] ✓ Resize state signed');
 
         // Submit Custody.resize() on-chain
         setStep('submitting_resize');
+        console.log('[useYellowDeposit] 5️⃣ Submitting Custody.resize() on-chain...');
         // Build the preceding state proof — either initial state (new channel) or current on-chain state (existing channel)
         // The adjudicator validates this state has valid signatures from both participants
         const precedingAllocsForProof = precedingAllocations
@@ -255,6 +331,21 @@ export function useYellowDeposit(): UseYellowDepositReturn {
             token: a.token as `0x${string}`,
             amount: 0n,
           }));
+
+        console.log('[useYellowDeposit] Resize args:', {
+          channelId: channel.channelId,
+          newState: {
+            intent: resizeInfo.state.intent,
+            version: resizeInfo.state.version,
+            allocationsCount: resizeInfo.state.allocations.length,
+          },
+          precedingState: {
+            intent: precedingIntent,
+            version: precedingVersion.toString(),
+            allocationsCount: precedingAllocsForProof.length,
+            sigsCount: precedingStateSigs.length,
+          },
+        });
 
         const resizeHash = await walletClient.writeContract({
           address: CUSTODY_ADDRESS,
@@ -283,21 +374,31 @@ export function useYellowDeposit(): UseYellowDepositReturn {
             }],
           ],
         });
+        console.log('[useYellowDeposit] ✓ Resize tx:', resizeHash);
         await publicClient.waitForTransactionReceipt({ hash: resizeHash });
+        console.log('[useYellowDeposit] ✓ Resize confirmed');
 
         // Retry refreshing shared balance — clearnode needs time to process the Resized event
+        console.log('[useYellowDeposit] 6️⃣ Waiting for clearnode to credit unified balance...');
         const delays = [2000, 3000, 5000];
         for (const delay of delays) {
           await new Promise((r) => setTimeout(r, delay));
+          console.log('[useYellowDeposit] Refreshing balances...');
           await refreshBalances();
         }
 
+        console.log('[useYellowDeposit] ✓ DEPOSIT COMPLETE');
         setStep('complete');
       } catch (err) {
+        console.error('[useYellowDeposit] ✗✗✗ DEPOSIT FAILED ✗✗✗');
+        console.error('[useYellowDeposit] Error:', err);
+        console.error('[useYellowDeposit] Stack:', (err as Error)?.stack);
         setStep('error');
         if (err instanceof Error) {
+          console.error('[useYellowDeposit] Error message:', err.message);
           setError(err.message);
         } else {
+          console.error('[useYellowDeposit] Unknown error:', JSON.stringify(err));
           setError('Deposit failed');
         }
       }

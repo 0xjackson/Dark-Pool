@@ -752,6 +752,7 @@ export async function requestCreateChannel(
   chainId: number,
   token: string,
 ): Promise<ChannelInfo> {
+  console.log('[requestCreateChannel] START for', userAddress, 'chain:', chainId, 'token:', token);
   const addr = getAddress(userAddress);
   const ws = await ensureUserWs(addr);
 
@@ -762,15 +763,20 @@ export async function requestCreateChannel(
     chain_id: chainId,
     token: token as `0x${string}`,
   });
+  console.log('[requestCreateChannel] Sending create_channel RPC...');
 
   const raw = await sendAndWait(ws, msg);
+  console.log('[requestCreateChannel] Raw response:', raw.substring(0, 500));
   const parsed = parseAnyRPCResponse(raw);
 
   if (parsed.method === RPCMethod.Error) {
+    console.error('[requestCreateChannel] ERROR:', JSON.stringify(parsed.params));
     throw new Error(`create_channel rejected: ${JSON.stringify(parsed.params)}`);
   }
 
+  console.log('[requestCreateChannel] Parsed method:', parsed.method);
   const data = parsed.params as any;
+  console.log('[requestCreateChannel] Parsed params:', JSON.stringify(data, null, 2).substring(0, 1000));
 
   // SDK's parseAnyRPCResponse transforms snake_case → camelCase,
   // so use camelCase fields (serverSignature, channelId, stateData).
