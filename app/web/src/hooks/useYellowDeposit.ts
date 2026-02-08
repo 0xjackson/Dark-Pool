@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useAccount, usePublicClient, useWalletClient, useSignTypedData } from 'wagmi';
-import { parseUnits, maxUint256, encodePacked, keccak256, encodeAbiParameters, zeroAddress } from 'viem';
+import { parseUnits, maxUint256, keccak256, encodeAbiParameters, zeroAddress } from 'viem';
 import {
   requestCreateChannel,
   requestResizeChannel,
@@ -64,7 +64,7 @@ interface UseYellowDepositReturn {
  * After completion, the user's unified balance is credited and they can trade.
  */
 export function useYellowDeposit(): UseYellowDepositReturn {
-  const { address, isConnected } = useAccount();
+  const { address, isConnected, chain } = useAccount();
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
   const { signTypedDataAsync } = useSignTypedData();
@@ -96,7 +96,7 @@ export function useYellowDeposit(): UseYellowDepositReturn {
       setError(null);
       setStep('idle');
 
-      if (!isConnected || !address || !walletClient || !publicClient) {
+      if (!isConnected || !address || !walletClient || !publicClient || !chain) {
         setError('Wallet must be connected');
         return;
       }
@@ -130,6 +130,7 @@ export function useYellowDeposit(): UseYellowDepositReturn {
             signTypedDataAsync,
             channelInfo,
             CUSTODY_ADDRESS,
+            chain.id,
           );
 
           // Submit Custody.create() on-chain
@@ -219,6 +220,7 @@ export function useYellowDeposit(): UseYellowDepositReturn {
           signTypedDataAsync,
           resizeInfo,
           CUSTODY_ADDRESS,
+          chain.id,
         );
 
         // Submit Custody.resize() on-chain
@@ -273,7 +275,7 @@ export function useYellowDeposit(): UseYellowDepositReturn {
         }
       }
     },
-    [address, isConnected, walletClient, publicClient, signTypedDataAsync, refreshBalances]
+    [address, isConnected, chain, walletClient, publicClient, signTypedDataAsync, refreshBalances]
   );
 
   return {
@@ -290,65 +292,60 @@ export function useYellowDeposit(): UseYellowDepositReturn {
 
 /**
  * Sign a channel state using EIP-712 via MetaMask.
- * The state is hashed as: keccak256(channelId, state.intent, state.version, state.data, allocations_hash)
- * Then signed using EIP-712 with the Custody contract as the verifying contract.
+ * Matches the Custody contract's EIP-712 domain ("Nitrolite:Custody", "0.3.0")
+ * and AllowStateHash type from Types.sol.
  */
 async function signChannelState(
   signTypedDataAsync: (args: any) => Promise<`0x${string}`>,
   channelInfo: ChannelInfo,
   custodyAddress: `0x${string}`,
+  chainId: number,
 ): Promise<`0x${string}`> {
-  // The Custody contract uses EIP-712 for state signatures.
-  // Domain: name="Custody", verifyingContract=custodyAddress
-  // Type: State(uint8 intent, uint256 version, bytes32 channelId, bytes32 allocationsHash, bytes32 dataHash)
-  const allocationsEncoded = encodeAbiParameters(
-    [{ type: 'tuple[]', components: [
-      { name: 'destination', type: 'address' },
-      { name: 'token', type: 'address' },
-      { name: 'amount', type: 'uint256' },
-    ]}],
-    [channelInfo.state.allocations.map((a) => ({
-      destination: a.destination as `0x${string}`,
-      token: a.token as `0x${string}`,
-      amount: BigInt(a.amount),
-    }))],
-  );
-  const allocationsHash = keccak256(allocationsEncoded);
-  const dataHash = keccak256((channelInfo.state.stateData || '0x') as `0x${string}`);
-
-  // Compute channelId from channel params
+  // Compute channelId from channel params — must include chainId to match Utils.getChannelId()
   const channelEncoded = encodeAbiParameters(
-    [{ type: 'address[]' }, { type: 'address' }, { type: 'uint256' }, { type: 'uint256' }],
+    [{ type: 'address[]' }, { type: 'address' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }],
     [
       channelInfo.channel.participants.map((p) => p as `0x${string}`),
       channelInfo.channel.adjudicator as `0x${string}`,
       BigInt(channelInfo.channel.challenge),
       BigInt(channelInfo.channel.nonce),
+      BigInt(chainId),
     ],
   );
   const channelId = keccak256(channelEncoded);
 
   const sig = await signTypedDataAsync({
     domain: {
-      name: 'Custody',
+      name: 'Nitrolite:Custody',
+      version: '0.3.0',
+      chainId,
       verifyingContract: custodyAddress,
     },
     types: {
-      State: [
+      AllowStateHash: [
         { name: 'channelId', type: 'bytes32' },
         { name: 'intent', type: 'uint8' },
         { name: 'version', type: 'uint256' },
-        { name: 'dataHash', type: 'bytes32' },
-        { name: 'allocationsHash', type: 'bytes32' },
+        { name: 'data', type: 'bytes' },
+        { name: 'allocations', type: 'Allocation[]' },
+      ],
+      Allocation: [
+        { name: 'destination', type: 'address' },
+        { name: 'token', type: 'address' },
+        { name: 'amount', type: 'uint256' },
       ],
     },
-    primaryType: 'State',
+    primaryType: 'AllowStateHash',
     message: {
       channelId,
       intent: channelInfo.state.intent,
       version: BigInt(channelInfo.state.version),
-      dataHash,
-      allocationsHash,
+      data: (channelInfo.state.stateData || '0x') as `0x${string}`,
+      allocations: channelInfo.state.allocations.map((a) => ({
+        destination: a.destination as `0x${string}`,
+        token: a.token as `0x${string}`,
+        amount: BigInt(a.amount),
+      })),
     },
   });
 
