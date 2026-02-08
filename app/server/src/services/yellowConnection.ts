@@ -19,6 +19,7 @@ import {
   createCloseChannelMessage,
   createGetChannelsMessageV2,
   createGetLedgerBalancesMessage,
+  createTransferMessage,
   parseAuthChallengeResponse,
   parseAuthVerifyResponse,
   parseAnyRPCResponse,
@@ -1019,6 +1020,40 @@ let sessionKeyDb: Pool;
 
 export function setChannelDb(pool: Pool): void {
   sessionKeyDb = pool;
+}
+
+// ---------------------------------------------------------------------------
+// Transfer (direct unified balance → unified balance, no App Session needed)
+// ---------------------------------------------------------------------------
+
+/**
+ * Transfer funds from one user's unified balance to another.
+ * Signed with the sender's session key and sent over the engine WS.
+ * Yellow validates the message signature, not the WS sender.
+ */
+export async function transferUnifiedBalance(
+  senderAddress: Address,
+  recipientAddress: Address,
+  asset: string,
+  amount: string,
+): Promise<void> {
+  if (!engineWs) throw new Error('Engine WS not connected');
+
+  const signer = await getUserSessionKeySigner(senderAddress);
+
+  const msg = await createTransferMessage(signer, {
+    destination: recipientAddress,
+    allocations: [{ asset, amount }],
+  });
+
+  const raw = await sendAndWait(engineWs, msg);
+  const parsed = parseAnyRPCResponse(raw);
+
+  if (parsed.method === RPCMethod.Error) {
+    throw new Error(`transfer rejected: ${JSON.stringify(parsed.params)}`);
+  }
+
+  console.log(`Transfer: ${amount} ${asset} from ${senderAddress} to ${recipientAddress}`);
 }
 
 export { sendAndWait };
