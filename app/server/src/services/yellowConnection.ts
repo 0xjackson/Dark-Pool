@@ -1037,8 +1037,8 @@ export async function transferUnifiedBalance(
   asset: string,
   amount: string,
 ): Promise<void> {
-  if (!engineWs) throw new Error('Engine WS not connected');
-
+  // Use the sender's authenticated WS — transfer is scoped to the authenticated wallet
+  const ws = await ensureUserWs(senderAddress);
   const signer = await getUserSessionKeySigner(senderAddress);
 
   const msg = await createTransferMessage(signer, {
@@ -1046,7 +1046,7 @@ export async function transferUnifiedBalance(
     allocations: [{ asset, amount }],
   });
 
-  const raw = await sendAndWait(engineWs, msg);
+  const raw = await sendAndWait(ws, msg);
   const parsed = parseAnyRPCResponse(raw);
 
   if (parsed.method === RPCMethod.Error) {
