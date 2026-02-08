@@ -871,24 +871,40 @@ export async function getLedgerBalances(
   userAddress: Address,
 ): Promise<LedgerBalance[]> {
   const addr = getAddress(userAddress);
+  console.log(`[getLedgerBalances] START for ${addr}`);
 
   // Use the user's WS — balance query is scoped to authenticated wallet
   const ws = await ensureUserWs(addr);
+  console.log(`[getLedgerBalances] Got user WS`);
+
   const signer = await getUserSessionKeySigner(addr);
+  console.log(`[getLedgerBalances] Got session key signer`);
+
   const msg = await createGetLedgerBalancesMessage(signer, addr);
+  console.log(`[getLedgerBalances] Sending get_ledger_balances RPC...`);
 
   const raw = await sendAndWait(ws, msg);
+  console.log(`[getLedgerBalances] Got response:`, raw.substring(0, 200));
+
   const parsed = parseAnyRPCResponse(raw);
+  console.log(`[getLedgerBalances] Parsed method:`, parsed.method);
+  console.log(`[getLedgerBalances] Parsed params:`, JSON.stringify(parsed.params));
 
   if (parsed.method === RPCMethod.Error) {
     throw new Error(`get_ledger_balances failed: ${JSON.stringify(parsed.params)}`);
   }
 
   const data = parsed.params as any;
-  return (data.ledger_balances || []).map((b: any) => ({
+  const ledgerBalances = data.ledger_balances || [];
+  console.log(`[getLedgerBalances] ledger_balances field:`, JSON.stringify(ledgerBalances));
+
+  const result = ledgerBalances.map((b: any) => ({
     asset: b.asset,
     amount: b.amount,
   }));
+  console.log(`[getLedgerBalances] RESULT:`, JSON.stringify(result));
+
+  return result;
 }
 
 /**
