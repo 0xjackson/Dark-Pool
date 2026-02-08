@@ -256,4 +256,31 @@ export const CUSTODY_ABI = [
     ],
     outputs: [{ name: '', type: 'uint256[][]' }],
   },
+  {
+    name: 'channels',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'channelId', type: 'bytes32' }],
+    outputs: [
+      {
+        name: '',
+        type: 'tuple',
+        components: [
+          { name: 'intent', type: 'uint8' },
+          { name: 'version', type: 'uint256' },
+          { name: 'data', type: 'bytes' },
+          {
+            name: 'allocations',
+            type: 'tuple[]',
+            components: [
+              { name: 'destination', type: 'address' },
+              { name: 'token', type: 'address' },
+              { name: 'amount', type: 'uint256' },
+            ],
+          },
+          { name: 'sigs', type: 'bytes[]' },
+        ],
+      },
+    ],
+  },
 ] as const;

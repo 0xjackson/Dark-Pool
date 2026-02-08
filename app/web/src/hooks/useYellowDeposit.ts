@@ -105,12 +105,14 @@ export function useYellowDeposit(): UseYellowDepositReturn {
           (ch) => ch.token?.toLowerCase() === custodyToken.toLowerCase() && ch.status === 'open'
         );
 
-        // Save initial state sigs for the resize proof (adjudicator requires them)
-        let initialStateSigs: `0x${string}`[] = [];
-        let initialStateData: `0x${string}` = '0x';
-        let initialAllocations: { destination: `0x${string}`; token: `0x${string}`; amount: bigint }[] | undefined;
+        // Save preceding state for the resize proof (adjudicator requires it)
+        let precedingStateSigs: `0x${string}`[] = [];
+        let precedingStateData: `0x${string}` = '0x';
+        let precedingAllocations: { destination: `0x${string}`; token: `0x${string}`; amount: bigint }[] | undefined;
+        let precedingIntent: number = 1; // INITIALIZE by default
+        let precedingVersion: bigint = 0n;
 
-        // Step 2: Create channel if needed
+        // Step 2: Create channel if needed, OR fetch existing state
         if (!channel) {
           setStep('creating_channel');
           const channelInfo = await requestCreateChannel(address, custodyToken, chain.id);
@@ -123,14 +125,16 @@ export function useYellowDeposit(): UseYellowDepositReturn {
             chain.id,
           );
 
-          // Save initial state info for resize proof
-          initialStateSigs = [userSig, channelInfo.serverSignature as `0x${string}`];
-          initialStateData = (channelInfo.state.stateData || '0x') as `0x${string}`;
-          initialAllocations = channelInfo.state.allocations.map((a) => ({
+          // Save initial state as preceding state for the first resize
+          precedingStateSigs = [userSig, channelInfo.serverSignature as `0x${string}`];
+          precedingStateData = (channelInfo.state.stateData || '0x') as `0x${string}`;
+          precedingAllocations = channelInfo.state.allocations.map((a) => ({
             destination: a.destination as `0x${string}`,
             token: a.token as `0x${string}`,
             amount: BigInt(a.amount),
           }));
+          precedingIntent = channelInfo.state.intent;
+          precedingVersion = BigInt(channelInfo.state.version);
 
           // Submit Custody.create() on-chain
           setStep('submitting_create');
@@ -148,9 +152,9 @@ export function useYellowDeposit(): UseYellowDepositReturn {
               {
                 intent: channelInfo.state.intent,
                 version: BigInt(channelInfo.state.version),
-                data: initialStateData,
-                allocations: initialAllocations,
-                sigs: initialStateSigs,
+                data: precedingStateData,
+                allocations: precedingAllocations,
+                sigs: precedingStateSigs,
               },
             ],
           });
@@ -167,6 +171,26 @@ export function useYellowDeposit(): UseYellowDepositReturn {
           if (!channel) {
             throw new Error('Channel created but not yet visible. Please retry in a few seconds.');
           }
+        } else {
+          // Channel exists — fetch current on-chain state to use as preceding proof
+          const currentState = await publicClient.readContract({
+            address: CUSTODY_ADDRESS,
+            abi: CUSTODY_ABI,
+            functionName: 'channels',
+            args: [channel.channelId as `0x${string}`],
+          }) as {
+            intent: number;
+            version: bigint;
+            data: `0x${string}`;
+            allocations: { destination: `0x${string}`; token: `0x${string}`; amount: bigint }[];
+            sigs: `0x${string}`[];
+          };
+
+          precedingIntent = currentState.intent;
+          precedingVersion = currentState.version;
+          precedingStateData = currentState.data;
+          precedingAllocations = currentState.allocations;
+          precedingStateSigs = currentState.sigs;
         }
 
         // Step 3: Deposit to Custody on-chain
@@ -223,9 +247,9 @@ export function useYellowDeposit(): UseYellowDepositReturn {
 
         // Submit Custody.resize() on-chain
         setStep('submitting_resize');
-        // Build the preceding state proof — the initial state from create()
+        // Build the preceding state proof — either initial state (new channel) or current on-chain state (existing channel)
         // The adjudicator validates this state has valid signatures from both participants
-        const precedingAllocations = initialAllocations
+        const precedingAllocsForProof = precedingAllocations
           || resizeInfo.state.allocations.map((a) => ({
             destination: a.destination as `0x${string}`,
             token: a.token as `0x${string}`,
@@ -249,13 +273,13 @@ export function useYellowDeposit(): UseYellowDepositReturn {
               })),
               sigs: [resizeSig, resizeInfo.serverSignature as `0x${string}`],
             },
-            // Proofs: preceding state (initial create state with original sigs)
+            // Proofs: preceding state (initial state for new channels, current state for existing)
             [{
-              intent: 1, // INITIALIZE
-              version: 0n,
-              data: initialStateData,
-              allocations: precedingAllocations,
-              sigs: initialStateSigs,
+              intent: precedingIntent,
+              version: precedingVersion,
+              data: precedingStateData,
+              allocations: precedingAllocsForProof,
+              sigs: precedingStateSigs,
             }],
           ],
         });
