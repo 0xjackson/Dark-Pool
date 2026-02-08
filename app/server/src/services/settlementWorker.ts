@@ -235,7 +235,9 @@ async function settleMatch(match: any): Promise<void> {
         proof.b.map((row: string[]) => row.map(BigInt)) as [[bigint, bigint], [bigint, bigint]],
         proof.c.map(BigInt) as [bigint, bigint],
       ],
-      gas: 500000n, // Manual gas limit to bypass estimation
+      gas: 500000n,
+      maxFeePerGas: 50000000n, // 0.05 gwei
+      maxPriorityFeePerGas: 1000000n, // 0.001 gwei
     });
 
     await publicClient.waitForTransactionReceipt({ hash: txHash });
