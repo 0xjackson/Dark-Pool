@@ -58,12 +58,18 @@ function attachResponseRouter(ws: WebSocket) {
     const data = raw.toString();
     try {
       const parsed = JSON.parse(data);
-      const reqId = parsed.res?.[0] ?? parsed.req?.[0];
+      const reqId = parsed.res?.[0] ?? parsed.req?.[0] ?? parsed.err?.[0];
       if (reqId !== undefined && pendingResponses.has(reqId)) {
         const handler = pendingResponses.get(reqId)!;
         clearTimeout(handler.timer);
         pendingResponses.delete(reqId);
-        handler.resolve(data);
+        // Clearnode sends errors as {"err": [reqId, code, "message", timestamp]}
+        if (parsed.err) {
+          const errMsg = parsed.err[2] || `Clearnode error code ${parsed.err[1]}`;
+          handler.reject(new Error(errMsg));
+        } else {
+          handler.resolve(data);
+        }
       }
     } catch {
       // not JSON or no reqId — ignore
