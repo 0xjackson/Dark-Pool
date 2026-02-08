@@ -30,6 +30,7 @@ import {
   EIP712AuthTypes,
 } from '@erc7824/nitrolite';
 import { generateSessionKey } from '../utils/keygen';
+import DarkPoolWebSocketServer from '../websocket/server';
 
 const YELLOW_WS_URL = process.env.YELLOW_WS_URL || 'wss://clearnet-sandbox.yellow.com/ws';
 const ENGINE_WALLET_KEY = process.env.ENGINE_WALLET_KEY as Hex | undefined;
@@ -46,6 +47,13 @@ let engineSessionKeyAddress: Address | null = null;
 let engineMessageSigner: ReturnType<typeof createECDSAMessageSigner> | null = null;
 let enginePingInterval: ReturnType<typeof setInterval> | null = null;
 
+// Reference to our frontend WS server (for broadcasting clearnode notifications)
+let wsServer: DarkPoolWebSocketServer | null = null;
+
+export function setWsServer(server: DarkPoolWebSocketServer): void {
+  wsServer = server;
+}
+
 // User WS pool: userAddress -> WebSocket
 const userWsPool: Map<string, WebSocket> = new Map();
 
@@ -53,7 +61,7 @@ const userWsPool: Map<string, WebSocket> = new Map();
 type ResponseHandler = { resolve: (data: string) => void; reject: (err: Error) => void; timer: ReturnType<typeof setTimeout> };
 const pendingResponses: Map<number, ResponseHandler> = new Map();
 
-function attachResponseRouter(ws: WebSocket) {
+function attachResponseRouter(ws: WebSocket, userAddress?: string) {
   ws.on('message', (raw: Buffer) => {
     const data = raw.toString();
     try {
@@ -70,11 +78,51 @@ function attachResponseRouter(ws: WebSocket) {
         } else {
           handler.resolve(data);
         }
+      } else if (parsed.res && parsed.res[0] === 0) {
+        // Unsolicited notification from clearnode (reqId=0)
+        handleClearnodeNotification(parsed, userAddress);
       }
     } catch {
       // not JSON or no reqId — ignore
     }
   });
+}
+
+/**
+ * Handle unsolicited clearnode notifications (reqId=0).
+ * Format: { "res": [0, "<method>", { ...data }, <timestamp>], "sig": [...] }
+ *
+ * Known methods:
+ * - "bu" (balance update) — unified balance changed after resize
+ * - "cu" (channel update) — channel state changed
+ * - "tr" (transaction) — logged but not broadcast
+ * - "asu" (app session update) — logged but not broadcast
+ */
+function handleClearnodeNotification(parsed: any, userAddress?: string): void {
+  const method = parsed.res[1];
+  const data = parsed.res[2];
+
+  if (method === 'bu') {
+    console.log(`Clearnode notification: bu for ${userAddress || 'unknown'}`);
+    if (wsServer && userAddress) {
+      wsServer.broadcast(`balances:${userAddress}`, {
+        type: 'balance_update',
+        data,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  } else if (method === 'cu') {
+    console.log(`Clearnode notification: cu for ${userAddress || 'unknown'}`);
+    if (wsServer && userAddress) {
+      wsServer.broadcast(`channels:${userAddress}`, {
+        type: 'channel_update',
+        data,
+        timestamp: new Date().toISOString(),
+      });
+    }
+  } else {
+    console.log(`Clearnode notification: ${method} for ${userAddress || 'unknown'} (not broadcast)`);
+  }
 }
 
 function sendAndWait(ws: WebSocket, message: string, timeout = RESPONSE_TIMEOUT): Promise<string> {
@@ -315,18 +363,19 @@ export async function openUserWs(
     return existingWs;
   }
 
+  const checksumAddr = getAddress(userAddress as Address);
   const ws = await connectWs(YELLOW_WS_URL);
-  attachResponseRouter(ws);
+  attachResponseRouter(ws, checksumAddr);
 
   await authenticateWs(ws, walletKey, sessionKeyAddress, 'clearnode', expiresAt, allowances);
 
   ws.on('close', () => {
-    userWsPool.delete(getAddress(userAddress as Address));
+    userWsPool.delete(checksumAddr);
     stopUserPing(userAddress);
     console.log(`User WS closed: ${userAddress}`);
   });
 
-  userWsPool.set(getAddress(userAddress as Address), ws);
+  userWsPool.set(checksumAddr, ws);
   startUserPing(userAddress);
   return ws;
 }
@@ -355,7 +404,7 @@ export async function authenticateUserWs(
   const checksumAddress = getAddress(userAddress as Address); // EIP-55
 
   const ws = await connectWs(YELLOW_WS_URL);
-  attachResponseRouter(ws);
+  attachResponseRouter(ws, checksumAddress);
 
   const authParams: AuthRequestParams = {
     address: checksumAddress,
@@ -501,7 +550,7 @@ export async function ensureUserWs(userAddress: string): Promise<WebSocket> {
 
   // 3. Open new WS and re-auth with JWT (no wallet signature needed)
   const ws = await connectWs(YELLOW_WS_URL);
-  attachResponseRouter(ws);
+  attachResponseRouter(ws, addr);
 
   // 3a. Send auth_request with stored session key info
   const skRow = await sessionKeyDb.query(

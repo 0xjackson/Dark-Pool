@@ -7,7 +7,7 @@ import sessionKeysRouter, { setSessionKeysDatabase } from './routes/sessionKeys'
 import channelsRouter from './routes/channels';
 import DarkPoolWebSocketServer from './websocket/server';
 import { getWarlockClient } from './services/warlockClient';
-import { initEngineConnection, setChannelDb } from './services/yellowConnection';
+import { initEngineConnection, setChannelDb, setWsServer } from './services/yellowConnection';
 import { startSettlementWorker, stopSettlementWorker } from './services/settlementWorker';
 
 // Load environment variables
@@ -95,6 +95,7 @@ app.use('/api/channel', channelsRouter);
 
 // Initialize WebSocket server
 const wsServer = new DarkPoolWebSocketServer(server);
+setWsServer(wsServer);
 
 // WebSocket stats endpoint
 app.get('/api/ws/stats', (req, res) => {
