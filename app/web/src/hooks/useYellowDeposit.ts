@@ -118,13 +118,17 @@ export function useYellowDeposit(): UseYellowDepositReturn {
           (ch) => ch.token?.toLowerCase() === custodyToken.toLowerCase() && ch.status === 'open'
         );
 
+        // Save initial state sigs for the resize proof (adjudicator requires them)
+        let initialStateSigs: `0x${string}`[] = [];
+        let initialStateData: `0x${string}` = '0x';
+        let initialAllocations: { destination: `0x${string}`; token: `0x${string}`; amount: bigint }[] | undefined;
+
         // Step 2: Create channel if needed
         if (!channel) {
           setStep('creating_channel');
           const channelInfo = await requestCreateChannel(address, custodyToken, chain.id);
-          console.log('[deposit] channelInfo from API:', JSON.stringify({ serverSignature: channelInfo.serverSignature, sigLength: channelInfo.serverSignature?.length }, null, 2));
 
-          // Sign the channel initial state with MetaMask (EIP-712)
+          // Sign the channel initial state with EIP-191 (personal_sign)
           setStep('signing_channel_state');
           const userSig = await signChannelState(
             walletClient,
@@ -132,9 +136,17 @@ export function useYellowDeposit(): UseYellowDepositReturn {
             chain.id,
           );
 
+          // Save initial state info for resize proof
+          initialStateSigs = [userSig, channelInfo.serverSignature as `0x${string}`];
+          initialStateData = (channelInfo.state.stateData || '0x') as `0x${string}`;
+          initialAllocations = channelInfo.state.allocations.map((a) => ({
+            destination: a.destination as `0x${string}`,
+            token: a.token as `0x${string}`,
+            amount: BigInt(a.amount),
+          }));
+
           // Submit Custody.create() on-chain
           setStep('submitting_create');
-          console.log('[deposit] sigs being sent to create():', { userSig, serverSig: channelInfo.serverSignature, serverSigType: typeof channelInfo.serverSignature });
           const createHash = await walletClient.writeContract({
             address: CUSTODY_ADDRESS,
             abi: CUSTODY_ABI,
@@ -149,13 +161,9 @@ export function useYellowDeposit(): UseYellowDepositReturn {
               {
                 intent: channelInfo.state.intent,
                 version: BigInt(channelInfo.state.version),
-                data: (channelInfo.state.stateData || '0x') as `0x${string}`,
-                allocations: channelInfo.state.allocations.map((a) => ({
-                  destination: a.destination as `0x${string}`,
-                  token: a.token as `0x${string}`,
-                  amount: BigInt(a.amount),
-                })),
-                sigs: [userSig, channelInfo.serverSignature as `0x${string}`],
+                data: initialStateData,
+                allocations: initialAllocations,
+                sigs: initialStateSigs,
               },
             ],
           });
@@ -217,25 +225,24 @@ export function useYellowDeposit(): UseYellowDepositReturn {
           `-${rawAmount.toString()}`,
         );
 
-        // Sign the resize state (pass channelId directly — resize response has no channel params)
+        // Sign the resize state
         setStep('signing_resize_state');
         const resizeSig = await signChannelState(
           walletClient,
           resizeInfo,
           chain.id,
-          channel.channelId as `0x${string}`,
         );
 
         // Submit Custody.resize() on-chain
         setStep('submitting_resize');
-        // Build the preceding state as proof (version - 1)
-        // The preceding state is the initial state (all-zero allocations) for the first resize,
-        // since the channel was created empty.
-        const precedingAllocations = resizeInfo.state.allocations.map((a) => ({
-          destination: a.destination as `0x${string}`,
-          token: a.token as `0x${string}`,
-          amount: 0n,
-        }));
+        // Build the preceding state proof — the initial state from create()
+        // The adjudicator validates this state has valid signatures from both participants
+        const precedingAllocations = initialAllocations
+          || resizeInfo.state.allocations.map((a) => ({
+            destination: a.destination as `0x${string}`,
+            token: a.token as `0x${string}`,
+            amount: 0n,
+          }));
 
         const resizeHash = await walletClient.writeContract({
           address: CUSTODY_ADDRESS,
@@ -254,13 +261,13 @@ export function useYellowDeposit(): UseYellowDepositReturn {
               })),
               sigs: [resizeSig, resizeInfo.serverSignature as `0x${string}`],
             },
-            // Proofs: preceding state (the state before resize)
+            // Proofs: preceding state (initial create state with original sigs)
             [{
-              intent: 1, // INITIALIZE or previous intent
-              version: BigInt(resizeInfo.state.version - 1),
-              data: '0x' as `0x${string}`,
+              intent: 1, // INITIALIZE
+              version: 0n,
+              data: initialStateData,
               allocations: precedingAllocations,
-              sigs: [],
+              sigs: initialStateSigs,
             }],
           ],
         });
@@ -306,13 +313,12 @@ async function signChannelState(
   walletClient: { signMessage: (args: any) => Promise<`0x${string}`> },
   channelInfo: ChannelInfo,
   chainId: number,
-  channelIdOverride?: `0x${string}`,
 ): Promise<`0x${string}`> {
-  // Use provided channelId (for resize where channel params aren't in the response)
-  // or compute from channel params (for create where we need to derive it)
+  // Use channelId from clearnode response if available (resize flow returns it directly).
+  // Only compute from channel params for create flow where we derive it locally.
   let channelId: `0x${string}`;
-  if (channelIdOverride) {
-    channelId = channelIdOverride;
+  if (channelInfo.channelId) {
+    channelId = channelInfo.channelId as `0x${string}`;
   } else {
     const channelEncoded = encodeAbiParameters(
       [{ type: 'address[]' }, { type: 'address' }, { type: 'uint64' }, { type: 'uint64' }, { type: 'uint256' }],
