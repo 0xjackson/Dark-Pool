@@ -396,12 +396,27 @@ export function useYellowDeposit(): UseYellowDepositReturn {
         console.log('[useYellowDeposit] 7️⃣ Closing channel to move funds to unified balance...');
         setStep('closing_channel');
 
+        // Refetch channels to get current channelId (it may have changed after resize)
+        await new Promise((r) => setTimeout(r, 2000));
+        const latestChannels = await getChannels(address);
+        const latestChannel = latestChannels.find(
+          (ch) => ch.status === 'open' && ch.token?.toLowerCase() === custodyToken.toLowerCase()
+        );
+
+        if (!latestChannel) {
+          console.warn('[useYellowDeposit] No open channel found after resize, skipping close');
+          setStep('complete');
+          return;
+        }
+
+        console.log(`[useYellowDeposit] Closing channel ${latestChannel.channelId}`);
+
         const closeResult = await fetch(`${API_BASE_URL}/api/channel/close`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             address,
-            channelId: channel.channelId,
+            channelId: latestChannel.channelId,
             fundsDestination: address,
           }),
         });
