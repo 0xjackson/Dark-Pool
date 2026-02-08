@@ -1,5 +1,6 @@
 'use client';
 
+import { memo } from 'react';
 import { motion } from 'framer-motion';
 
 interface GlowOrbProps {
@@ -20,7 +21,7 @@ interface GlowOrbProps {
  * - GPU-accelerated transforms
  * - Blur effect for dreamy glow
  */
-export function GlowOrb({
+export const GlowOrb = memo(function GlowOrb({
   delay = 0,
   duration = 40,
   size = 300,
@@ -53,4 +54,4 @@ export function GlowOrb({
       }}
     />
   );
-}
+});

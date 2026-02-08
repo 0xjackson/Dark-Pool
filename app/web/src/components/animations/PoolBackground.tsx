@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { motion } from 'framer-motion';
 
 /**
@@ -13,7 +13,7 @@ import { motion } from 'framer-motion';
  * - Low opacity for subtle effect
  * - Fixed positioning behind content
  */
-export function PoolBackground() {
+export const PoolBackground = memo(function PoolBackground() {
   const blobs = useMemo(() => [
     {
       id: 1,
@@ -94,4 +94,4 @@ export function PoolBackground() {
       ))}
     </div>
   );
-}
+});
