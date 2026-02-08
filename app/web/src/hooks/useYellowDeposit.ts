@@ -393,6 +393,18 @@ export function useYellowDeposit(): UseYellowDepositReturn {
         }
 
         // 🆕 Step 7: Close the channel to move funds to unified balance
+        // TODO: Channel close is reverting - needs investigation into Yellow's exact state verification
+        // For now, users must close channels manually before trading to avoid multi-channel limitation
+        console.log('[useYellowDeposit] ⚠️  Skipping automatic channel close (not implemented yet)');
+        console.log('[useYellowDeposit] Users must close deposit channels manually before trading');
+
+        // Skip close for now
+        console.log('[useYellowDeposit] ✓ DEPOSIT COMPLETE');
+        setStep('complete');
+        return;
+
+        // COMMENTED OUT - CLOSE IMPLEMENTATION NEEDS FIXING
+        /*
         console.log('[useYellowDeposit] 7️⃣ Closing channel to move funds to unified balance...');
         setStep('closing_channel');
 
@@ -462,6 +474,7 @@ export function useYellowDeposit(): UseYellowDepositReturn {
 
         console.log('[useYellowDeposit] ✓ DEPOSIT COMPLETE');
         setStep('complete');
+        */
       } catch (err) {
         console.error('[useYellowDeposit] ✗✗✗ DEPOSIT FAILED ✗✗✗');
         console.error('[useYellowDeposit] Error:', err);
