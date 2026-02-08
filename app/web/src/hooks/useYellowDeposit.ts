@@ -172,25 +172,24 @@ export function useYellowDeposit(): UseYellowDepositReturn {
             throw new Error('Channel created but not yet visible. Please retry in a few seconds.');
           }
         } else {
-          // Channel exists — fetch current on-chain state to use as preceding proof
-          const currentState = await publicClient.readContract({
+          // Existing channel — read lastValidState from contract via getChannelData
+          const channelData = await publicClient.readContract({
             address: CUSTODY_ADDRESS,
             abi: CUSTODY_ABI,
-            functionName: 'channels',
+            functionName: 'getChannelData',
             args: [channel.channelId as `0x${string}`],
-          }) as {
-            intent: number;
-            version: bigint;
-            data: `0x${string}`;
-            allocations: { destination: `0x${string}`; token: `0x${string}`; amount: bigint }[];
-            sigs: `0x${string}`[];
-          };
-
-          precedingIntent = currentState.intent;
-          precedingVersion = currentState.version;
-          precedingStateData = currentState.data;
-          precedingAllocations = currentState.allocations;
-          precedingStateSigs = currentState.sigs;
+          });
+          // getChannelData returns [channel, status, wallets, challengeExpiry, lastValidState]
+          const lastValidState = (channelData as any[])[4];
+          precedingIntent = Number(lastValidState.intent);
+          precedingVersion = BigInt(lastValidState.version);
+          precedingStateData = lastValidState.data as `0x${string}`;
+          precedingAllocations = lastValidState.allocations.map((a: any) => ({
+            destination: a.destination as `0x${string}`,
+            token: a.token as `0x${string}`,
+            amount: BigInt(a.amount),
+          }));
+          precedingStateSigs = lastValidState.sigs as `0x${string}`[];
         }
 
         // Step 3: Deposit to Custody on-chain

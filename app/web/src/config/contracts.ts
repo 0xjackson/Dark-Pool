@@ -257,13 +257,26 @@ export const CUSTODY_ABI = [
     outputs: [{ name: '', type: 'uint256[][]' }],
   },
   {
-    name: 'channels',
+    name: 'getChannelData',
     type: 'function',
     stateMutability: 'view',
     inputs: [{ name: 'channelId', type: 'bytes32' }],
     outputs: [
       {
-        name: '',
+        name: 'channel',
+        type: 'tuple',
+        components: [
+          { name: 'participants', type: 'address[]' },
+          { name: 'adjudicator', type: 'address' },
+          { name: 'challenge', type: 'uint64' },
+          { name: 'nonce', type: 'uint64' },
+        ],
+      },
+      { name: 'status', type: 'uint8' },
+      { name: 'wallets', type: 'address[]' },
+      { name: 'challengeExpiry', type: 'uint256' },
+      {
+        name: 'lastValidState',
         type: 'tuple',
         components: [
           { name: 'intent', type: 'uint8' },
