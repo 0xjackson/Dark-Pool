@@ -141,7 +141,7 @@ export function useYellowDeposit(): UseYellowDepositReturn {
           console.log('[useYellowDeposit] Requesting channel creation from clearnode...');
           const channelInfo = await requestCreateChannel(address, custodyToken, chain.id);
           console.log('[useYellowDeposit] Channel creation response:', {
-            channelId: channelInfo.channel_id,
+            channelId: channelInfo.channelId,
             participants: channelInfo.channel.participants,
             adjudicator: channelInfo.channel.adjudicator,
             nonce: channelInfo.channel.nonce,
