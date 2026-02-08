@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { useAccount, usePublicClient, useWalletClient, useSignTypedData } from 'wagmi';
+import { useAccount, usePublicClient, useWalletClient } from 'wagmi';
 import { parseUnits, maxUint256, keccak256, encodeAbiParameters, zeroAddress } from 'viem';
 import {
   requestCreateChannel,
@@ -67,7 +67,6 @@ export function useYellowDeposit(): UseYellowDepositReturn {
   const { address, isConnected, chain } = useAccount();
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
-  const { signTypedDataAsync } = useSignTypedData();
 
   const [step, setStep] = useState<DepositStep>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -128,9 +127,8 @@ export function useYellowDeposit(): UseYellowDepositReturn {
           // Sign the channel initial state with MetaMask (EIP-712)
           setStep('signing_channel_state');
           const userSig = await signChannelState(
-            signTypedDataAsync,
+            walletClient,
             channelInfo,
-            CUSTODY_ADDRESS,
             chain.id,
           );
 
@@ -222,9 +220,8 @@ export function useYellowDeposit(): UseYellowDepositReturn {
         // Sign the resize state
         setStep('signing_resize_state');
         const resizeSig = await signChannelState(
-          signTypedDataAsync,
+          walletClient,
           resizeInfo,
-          CUSTODY_ADDRESS,
           chain.id,
         );
 
@@ -280,7 +277,7 @@ export function useYellowDeposit(): UseYellowDepositReturn {
         }
       }
     },
-    [address, isConnected, chain, walletClient, publicClient, signTypedDataAsync, refreshBalances]
+    [address, isConnected, chain, walletClient, publicClient, refreshBalances]
   );
 
   return {
@@ -296,14 +293,16 @@ export function useYellowDeposit(): UseYellowDepositReturn {
 }
 
 /**
- * Sign a channel state using EIP-712 via MetaMask.
- * Matches the Custody contract's EIP-712 domain ("Nitrolite:Custody", "0.3.0")
- * and AllowStateHash type from Types.sol.
+ * Sign a channel state using EIP-191 (personal_sign) via MetaMask.
+ * Matches the Nitrolite SDK's WalletStateSigner approach:
+ *   1. ABI-encode the full packed state (channelId, intent, version, data, allocations)
+ *   2. Sign with personal_sign (EIP-191) over the raw packed bytes
+ * The Custody contract's verifyStateEOASignature() recovers this via
+ * MessageHashUtils.toEthSignedMessageHash(bytes memory) — the full packed state overload.
  */
 async function signChannelState(
-  signTypedDataAsync: (args: any) => Promise<`0x${string}`>,
+  walletClient: { signMessage: (args: any) => Promise<`0x${string}`> },
   channelInfo: ChannelInfo,
-  custodyAddress: `0x${string}`,
   chainId: number,
 ): Promise<`0x${string}`> {
   // Compute channelId from channel params — must include chainId to match Utils.getChannelId()
@@ -319,40 +318,35 @@ async function signChannelState(
   );
   const channelId = keccak256(channelEncoded);
 
-  const sig = await signTypedDataAsync({
-    domain: {
-      name: 'Nitrolite:Custody',
-      version: '0.3.0',
-      chainId,
-      verifyingContract: custodyAddress,
-    },
-    types: {
-      AllowStateHash: [
-        { name: 'channelId', type: 'bytes32' },
-        { name: 'intent', type: 'uint8' },
-        { name: 'version', type: 'uint256' },
-        { name: 'data', type: 'bytes' },
-        { name: 'allocations', type: 'Allocation[]' },
-      ],
-      Allocation: [
-        { name: 'destination', type: 'address' },
-        { name: 'token', type: 'address' },
-        { name: 'amount', type: 'uint256' },
-      ],
-    },
-    primaryType: 'AllowStateHash',
-    message: {
+  // Pack the state matching SDK's getPackedState / contract's Utils.getPackedState
+  const packedState = encodeAbiParameters(
+    [
+      { type: 'bytes32' },
+      { type: 'uint8' },
+      { type: 'uint256' },
+      { type: 'bytes' },
+      {
+        type: 'tuple[]',
+        components: [
+          { type: 'address' },
+          { type: 'address' },
+          { type: 'uint256' },
+        ],
+      },
+    ],
+    [
       channelId,
-      intent: channelInfo.state.intent,
-      version: BigInt(channelInfo.state.version),
-      data: (channelInfo.state.stateData || '0x') as `0x${string}`,
-      allocations: channelInfo.state.allocations.map((a) => ({
-        destination: a.destination as `0x${string}`,
-        token: a.token as `0x${string}`,
-        amount: BigInt(a.amount),
-      })),
-    },
-  });
+      channelInfo.state.intent,
+      BigInt(channelInfo.state.version),
+      (channelInfo.state.stateData || '0x') as `0x${string}`,
+      channelInfo.state.allocations.map((a) => [
+        a.destination as `0x${string}`,
+        a.token as `0x${string}`,
+        BigInt(a.amount),
+      ] as [`0x${string}`, `0x${string}`, bigint]),
+    ],
+  );
 
-  return sig;
+  // Sign with EIP-191 (personal_sign) — MetaMask will show "Sign message" prompt
+  return walletClient.signMessage({ message: { raw: packedState } });
 }
