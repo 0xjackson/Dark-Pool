@@ -217,12 +217,13 @@ export function useYellowDeposit(): UseYellowDepositReturn {
           `-${rawAmount.toString()}`,
         );
 
-        // Sign the resize state
+        // Sign the resize state (pass channelId directly — resize response has no channel params)
         setStep('signing_resize_state');
         const resizeSig = await signChannelState(
           walletClient,
           resizeInfo,
           chain.id,
+          channel.channelId as `0x${string}`,
         );
 
         // Submit Custody.resize() on-chain
@@ -304,19 +305,26 @@ async function signChannelState(
   walletClient: { signMessage: (args: any) => Promise<`0x${string}`> },
   channelInfo: ChannelInfo,
   chainId: number,
+  channelIdOverride?: `0x${string}`,
 ): Promise<`0x${string}`> {
-  // Compute channelId from channel params — must include chainId to match Utils.getChannelId()
-  const channelEncoded = encodeAbiParameters(
-    [{ type: 'address[]' }, { type: 'address' }, { type: 'uint64' }, { type: 'uint64' }, { type: 'uint256' }],
-    [
-      channelInfo.channel.participants.map((p) => p as `0x${string}`),
-      channelInfo.channel.adjudicator as `0x${string}`,
-      BigInt(channelInfo.channel.challenge),
-      BigInt(channelInfo.channel.nonce),
-      BigInt(chainId),
-    ],
-  );
-  const channelId = keccak256(channelEncoded);
+  // Use provided channelId (for resize where channel params aren't in the response)
+  // or compute from channel params (for create where we need to derive it)
+  let channelId: `0x${string}`;
+  if (channelIdOverride) {
+    channelId = channelIdOverride;
+  } else {
+    const channelEncoded = encodeAbiParameters(
+      [{ type: 'address[]' }, { type: 'address' }, { type: 'uint64' }, { type: 'uint64' }, { type: 'uint256' }],
+      [
+        channelInfo.channel.participants.map((p) => p as `0x${string}`),
+        channelInfo.channel.adjudicator as `0x${string}`,
+        BigInt(channelInfo.channel.challenge),
+        BigInt(channelInfo.channel.nonce),
+        BigInt(chainId),
+      ],
+    );
+    channelId = keccak256(channelEncoded);
+  }
 
   // Pack the state matching SDK's getPackedState / contract's Utils.getPackedState
   const packedState = encodeAbiParameters(
