@@ -173,8 +173,8 @@ export const CUSTODY_ABI = [
         components: [
           { name: 'participants', type: 'address[]' },
           { name: 'adjudicator', type: 'address' },
-          { name: 'challenge', type: 'uint256' },
-          { name: 'nonce', type: 'uint256' },
+          { name: 'challenge', type: 'uint64' },
+          { name: 'nonce', type: 'uint64' },
         ],
       },
       {

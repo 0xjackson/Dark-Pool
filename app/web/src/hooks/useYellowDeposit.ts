@@ -305,7 +305,7 @@ async function signChannelState(
 ): Promise<`0x${string}`> {
   // Compute channelId from channel params — must include chainId to match Utils.getChannelId()
   const channelEncoded = encodeAbiParameters(
-    [{ type: 'address[]' }, { type: 'address' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }],
+    [{ type: 'address[]' }, { type: 'address' }, { type: 'uint64' }, { type: 'uint64' }, { type: 'uint256' }],
     [
       channelInfo.channel.participants.map((p) => p as `0x${string}`),
       channelInfo.channel.adjudicator as `0x${string}`,
