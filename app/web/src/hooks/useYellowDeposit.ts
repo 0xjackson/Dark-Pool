@@ -214,15 +214,16 @@ export function useYellowDeposit(): UseYellowDepositReturn {
         await publicClient.waitForTransactionReceipt({ hash: depositHash });
 
         // Step 4: Resize channel to move funds from Custody ledger → unified balance
-        // resize_amount = +rawAmount (pull from custody ledger into channel on-chain)
-        // allocate_amount = -rawAmount (push from channel into unified balance)
-        // Net effect: channel stays at zero, unified balance credited
+        // resize_amount = +rawAmount ONLY (pull from custody ledger into channel on-chain)
+        // The clearnode's handleResized auto-credits the unified balance when
+        // DeltaAllocations[0] > 0. Using allocate_amount=-X would cancel out
+        // the delta to zero, preventing the credit.
         setStep('requesting_resize');
         const resizeInfo = await requestResizeChannel(
           address,
           channel.channelId,
           rawAmount.toString(),
-          `-${rawAmount.toString()}`,
+          '0', // allocate_amount must be 0 — see DEPOSIT_INVESTIGATION.md
         );
 
         // Sign the resize state

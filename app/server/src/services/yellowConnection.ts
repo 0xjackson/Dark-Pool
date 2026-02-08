@@ -809,17 +809,20 @@ export async function requestResizeChannel(
 
 /**
  * Get unified (ledger) balances for a user from the clearnode.
- * Uses the engine's WS with accountId param — no per-user WS needed.
+ * MUST use the user's authenticated WS — get_ledger_balances is scoped
+ * to the authenticated wallet (engine WS returns empty for user balances).
  */
 export async function getLedgerBalances(
   userAddress: Address,
 ): Promise<LedgerBalance[]> {
-  if (!engineWs || !engineMessageSigner) throw new Error('Engine WS not connected');
-
   const addr = getAddress(userAddress);
-  const msg = await createGetLedgerBalancesMessage(engineMessageSigner, addr);
 
-  const raw = await sendAndWait(engineWs, msg);
+  // Use the user's WS — balance query is scoped to authenticated wallet
+  const ws = await ensureUserWs(addr);
+  const signer = await getUserSessionKeySigner(addr);
+  const msg = await createGetLedgerBalancesMessage(signer, addr);
+
+  const raw = await sendAndWait(ws, msg);
   const parsed = parseAnyRPCResponse(raw);
 
   if (parsed.method === RPCMethod.Error) {
