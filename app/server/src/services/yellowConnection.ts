@@ -893,7 +893,29 @@ export async function requestCloseChannel(
     fundsDestination,
   );
 
-  return sendRpc(ws, message, 'close_channel');
+  const raw = await sendAndWait(ws, message);
+  const parsed = parseAnyRPCResponse(raw);
+
+  if (parsed.method === RPCMethod.Error) {
+    throw new Error(`close_channel rejected: ${JSON.stringify(parsed.params)}`);
+  }
+
+  const data = parsed.params as any;
+
+  return {
+    channelId: data.channelId || data.channel_id,
+    state: {
+      intent: data.state?.intent || 3,
+      version: data.state?.version || 0,
+      stateData: data.state?.stateData || data.state?.state_data || '0x',
+      allocations: (data.state?.allocations || []).map((a: any) => ({
+        destination: a.destination || a.participant,
+        token: a.token || a.token_address,
+        amount: String(a.amount || '0'),
+      })),
+    },
+    serverSignature: data.serverSignature || data.server_signature || '',
+  };
 }
 
 /**
