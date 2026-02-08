@@ -5,7 +5,7 @@ import { generateSessionKey } from '../utils/keygen';
 import {
   authenticateUserWs,
   completeUserAuth,
-  getUserWs,
+  ensureUserWs,
   revokeSessionKey,
 } from '../services/yellowConnection';
 
@@ -42,13 +42,17 @@ router.post('/create', async (req: Request, res: Response) => {
     );
 
     if (existing.rows.length > 0) {
-      // Key is ACTIVE and registered with Yellow — all channel ops
-      // route through engine WS, so no per-user WS needed.
-      return res.json({
-        active: true,
-        sessionKeyAddress: existing.rows[0].address,
-        expiresAt: existing.rows[0].expires_at,
-      });
+      // Try to ensure WS is alive (will use JWT to reconnect if needed)
+      try {
+        await ensureUserWs(addr);
+        return res.json({
+          active: true,
+          sessionKeyAddress: existing.rows[0].address,
+          expiresAt: existing.rows[0].expires_at,
+        });
+      } catch {
+        // JWT expired or no JWT — fall through to generate new session key + challenge
+      }
     }
 
     // Generate new session key
@@ -72,7 +76,7 @@ router.post('/create', async (req: Request, res: Response) => {
     // Store in DB as PENDING (include challengeRaw so /activate can use it)
     await db.query(
       `INSERT INTO session_keys (owner, address, private_key, application, allowances, status, expires_at)
-       VALUES ($1, $2, $3, 'dark-pool', $4, 'PENDING', $5)
+       VALUES ($1, $2, $3, 'clearnode', $4, 'PENDING', $5)
        ON CONFLICT (owner, application) DO UPDATE
        SET address = $2, private_key = $3, allowances = $4, status = 'PENDING', expires_at = $5`,
       [addr, sk.address, sk.privateKey, JSON.stringify(userAllowances), expiresAtDate.toISOString()],
@@ -123,15 +127,23 @@ router.post('/activate', async (req: Request, res: Response) => {
 
     const sessionKeyAddress = keyRow.rows[0].address;
 
-    // Complete auth on Yellow
-    await completeUserAuth(addr, signature as Hex, challengeRaw);
+    // Complete auth on Yellow — returns JWT for future reconnections
+    const jwt = await completeUserAuth(addr, signature as Hex, challengeRaw);
 
-    // Ensure status is ACTIVE
-    await db.query(
-      `UPDATE session_keys SET status = 'ACTIVE'
-       WHERE owner = $1 AND address = $2`,
-      [addr, sessionKeyAddress],
-    );
+    // Activate and store JWT
+    if (jwt) {
+      await db.query(
+        `UPDATE session_keys SET status = 'ACTIVE', jwt_token = $1
+         WHERE owner = $2 AND address = $3`,
+        [jwt, addr, sessionKeyAddress],
+      );
+    } else {
+      await db.query(
+        `UPDATE session_keys SET status = 'ACTIVE'
+         WHERE owner = $1 AND address = $2`,
+        [addr, sessionKeyAddress],
+      );
+    }
 
     const updated = await db.query(
       `SELECT expires_at FROM session_keys WHERE owner = $1 AND address = $2`,

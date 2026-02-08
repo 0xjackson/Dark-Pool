@@ -1,0 +1,1 @@
+ALTER TABLE session_keys ADD COLUMN IF NOT EXISTS jwt_token TEXT;

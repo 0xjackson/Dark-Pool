@@ -6,6 +6,7 @@ import { mainnet } from 'viem/chains';
 import {
   createAuthRequestMessage,
   createAuthVerifyMessage,
+  createAuthVerifyMessageWithJWT,
   createEIP712AuthMessageSigner,
   createECDSAMessageSigner,
   createGetAssetsMessageV2,
@@ -18,6 +19,7 @@ import {
   createGetChannelsMessageV2,
   createGetLedgerBalancesMessage,
   parseAuthChallengeResponse,
+  parseAuthVerifyResponse,
   parseAnyRPCResponse,
   parseGetAssetsResponse,
   parseCreateAppSessionResponse,
@@ -310,7 +312,7 @@ export async function openUserWs(
   const ws = await connectWs(YELLOW_WS_URL);
   attachResponseRouter(ws);
 
-  await authenticateWs(ws, walletKey, sessionKeyAddress, 'dark-pool', expiresAt, allowances);
+  await authenticateWs(ws, walletKey, sessionKeyAddress, 'clearnode', expiresAt, allowances);
 
   ws.on('close', () => {
     userWsPool.delete(getAddress(userAddress as Address));
@@ -352,7 +354,7 @@ export async function authenticateUserWs(
   const authParams: AuthRequestParams = {
     address: checksumAddress,
     session_key: sessionKeyAddress,
-    application: 'dark-pool',
+    application: 'clearnode',
     expires_at: expiresAt,
     scope: 'console',
     allowances,
@@ -373,7 +375,7 @@ export async function authenticateUserWs(
 
   // Build EIP-712 typed data for the frontend to sign
   const eip712 = {
-    domain: { name: 'dark-pool' },
+    domain: { name: 'clearnode' },
     types: EIP712AuthTypes,
     primaryType: 'Policy' as const,
     message: {
@@ -424,7 +426,7 @@ export async function completeUserAuth(
   userAddress: string,
   signature: Hex,
   challengeRaw: string,
-): Promise<void> {
+): Promise<string | undefined> {
   const ws = getUserWs(userAddress);
   if (!ws) throw new Error(`No WS found for user ${userAddress}`);
 
@@ -441,9 +443,117 @@ export async function completeUserAuth(
     throw new Error(`User auth verify failed: ${JSON.stringify(verifyParsed.params)}`);
   }
 
+  // Extract JWT from auth_verify response
+  const authVerifyParsed = parseAuthVerifyResponse(verifyRaw);
+  const jwt = authVerifyParsed.params.jwtToken;
+
   // Start keepalive pings so the user WS stays alive for channel operations
   startUserPing(userAddress);
   console.log(`User WS authenticated and keepalive started: ${userAddress}`);
+
+  return jwt;
+}
+
+// ---------------------------------------------------------------------------
+// JWT DB helpers
+// ---------------------------------------------------------------------------
+
+async function storeUserJwt(userAddress: string, jwt: string): Promise<void> {
+  await sessionKeyDb.query(
+    `UPDATE session_keys SET jwt_token = $1 WHERE owner = $2 AND status = 'ACTIVE'`,
+    [jwt, getAddress(userAddress as Address)],
+  );
+}
+
+async function getUserJwt(userAddress: string): Promise<string | undefined> {
+  const result = await sessionKeyDb.query(
+    `SELECT jwt_token FROM session_keys WHERE owner = $1 AND status = 'ACTIVE' AND expires_at > NOW()
+     LIMIT 1`,
+    [getAddress(userAddress as Address)],
+  );
+  return result.rows[0]?.jwt_token || undefined;
+}
+
+export { storeUserJwt };
+
+// ---------------------------------------------------------------------------
+// ensureUserWs — reconnect via JWT if WS is dead
+// ---------------------------------------------------------------------------
+
+export async function ensureUserWs(userAddress: string): Promise<WebSocket> {
+  const addr = getAddress(userAddress as Address);
+
+  // 1. Check if WS is already alive
+  const existing = getUserWs(addr);
+  if (existing) return existing;
+
+  // 2. Look up stored JWT
+  const jwt = await getUserJwt(addr);
+  if (!jwt) {
+    throw new Error('No active session — please reconnect wallet');
+  }
+
+  // 3. Open new WS and re-auth with JWT (no wallet signature needed)
+  const ws = await connectWs(YELLOW_WS_URL);
+  attachResponseRouter(ws);
+
+  // 3a. Send auth_request with stored session key info
+  const skRow = await sessionKeyDb.query(
+    `SELECT address, expires_at, allowances FROM session_keys
+     WHERE owner = $1 AND status = 'ACTIVE' AND expires_at > NOW()
+     LIMIT 1`,
+    [addr],
+  );
+  if (skRow.rows.length === 0) {
+    ws.close();
+    throw new Error('No active session key — please reconnect wallet');
+  }
+
+  const skAddress = skRow.rows[0].address as Address;
+  const expiresAt = BigInt(Math.floor(new Date(skRow.rows[0].expires_at).getTime() / 1000));
+  const allowances = skRow.rows[0].allowances || [];
+
+  const authParams: AuthRequestParams = {
+    address: addr,
+    session_key: skAddress,
+    application: 'clearnode',
+    expires_at: expiresAt,
+    scope: 'console',
+    allowances,
+  };
+
+  const authReqMsg = await createAuthRequestMessage(authParams);
+  const challengeRaw = await sendAndWait(ws, authReqMsg);
+
+  // 3b. Send JWT auth_verify (no signature required)
+  const jwtVerifyMsg = await createAuthVerifyMessageWithJWT(jwt);
+  const verifyRaw = await sendAndWait(ws, jwtVerifyMsg);
+  const verifyParsed = parseAnyRPCResponse(verifyRaw);
+
+  if (verifyParsed.method === RPCMethod.Error) {
+    ws.close();
+    throw new Error('Session expired — please reconnect wallet');
+  }
+
+  // 3c. Extract and store new JWT
+  const authVerifyParsed = parseAuthVerifyResponse(verifyRaw);
+  const newJwt = authVerifyParsed.params.jwtToken;
+  if (newJwt) {
+    await storeUserJwt(addr, newJwt);
+  }
+
+  // 3d. Add to pool and start keepalive
+  ws.on('close', () => {
+    userWsPool.delete(addr);
+    stopUserPing(addr);
+    console.log(`User WS closed (JWT reconnect): ${addr}`);
+  });
+
+  userWsPool.set(addr, ws);
+  startUserPing(addr);
+  console.log(`User WS reconnected via JWT: ${addr}`);
+
+  return ws;
 }
 
 // ---------------------------------------------------------------------------
@@ -588,8 +698,7 @@ export async function requestCreateChannel(
   token: string,
 ): Promise<ChannelInfo> {
   const addr = getAddress(userAddress);
-  const ws = getUserWs(addr);
-  if (!ws) throw new Error('No active session key — please reconnect your wallet');
+  const ws = await ensureUserWs(addr);
 
   // Sign with user's session key from DB
   const signer = await getUserSessionKeySigner(addr);
@@ -641,8 +750,7 @@ export async function requestResizeChannel(
   allocateAmount: string,
 ): Promise<ChannelInfo> {
   const addr = getAddress(userAddress);
-  const ws = getUserWs(addr);
-  if (!ws) throw new Error('No active session key — please reconnect your wallet');
+  const ws = await ensureUserWs(addr);
 
   const signer = await getUserSessionKeySigner(addr);
 
