@@ -251,8 +251,9 @@ export const CUSTODY_ABI = [
     type: 'function',
     stateMutability: 'nonpayable',
     inputs: [
+      { name: 'channelId', type: 'bytes32' },
       {
-        name: 'finalState',
+        name: 'candidate',
         type: 'tuple',
         components: [
           { name: 'intent', type: 'uint8' },
@@ -270,7 +271,25 @@ export const CUSTODY_ABI = [
           { name: 'sigs', type: 'bytes[]' },
         ],
       },
-      { name: 'stateData', type: 'bytes' },
+      {
+        name: 'proofs',
+        type: 'tuple[]',
+        components: [
+          { name: 'intent', type: 'uint8' },
+          { name: 'version', type: 'uint256' },
+          { name: 'data', type: 'bytes' },
+          {
+            name: 'allocations',
+            type: 'tuple[]',
+            components: [
+              { name: 'destination', type: 'address' },
+              { name: 'token', type: 'address' },
+              { name: 'amount', type: 'uint256' },
+            ],
+          },
+          { name: 'sigs', type: 'bytes[]' },
+        ],
+      },
     ],
     outputs: [],
   },

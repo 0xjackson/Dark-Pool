@@ -392,19 +392,8 @@ export function useYellowDeposit(): UseYellowDepositReturn {
           await refreshBalances();
         }
 
-        // 🆕 Step 7: Close the channel to move funds to unified balance
-        // TODO: Channel close is reverting - needs investigation into Yellow's exact state verification
-        // For now, users must close channels manually before trading to avoid multi-channel limitation
-        console.log('[useYellowDeposit] ⚠️  Skipping automatic channel close (not implemented yet)');
-        console.log('[useYellowDeposit] Users must close deposit channels manually before trading');
-
-        // Skip close for now
-        console.log('[useYellowDeposit] ✓ DEPOSIT COMPLETE');
-        setStep('complete');
-        return;
-
-        // COMMENTED OUT - CLOSE IMPLEMENTATION NEEDS FIXING
-        /*
+        // Step 7: Close the channel to move funds to unified balance
+        // This is required so the user has no open channels, which would block App Session creation
         console.log('[useYellowDeposit] 7️⃣ Closing channel to move funds to unified balance...');
         setStep('closing_channel');
 
@@ -438,17 +427,26 @@ export function useYellowDeposit(): UseYellowDepositReturn {
         }
 
         const closeInfo = await closeResult.json();
-        console.log('[useYellowDeposit] Close prepared by clearnode');
+        console.log('[useYellowDeposit] Close response from clearnode:', {
+          channelId: closeInfo.channelId,
+          intent: closeInfo.state.intent,
+          version: closeInfo.state.version,
+          allocations: closeInfo.state.allocations,
+        });
 
-        // Step 8: Submit close transaction on-chain
+        // Step 8: Sign and submit close transaction on-chain
         setStep('submitting_close');
         const closeSig = await signChannelState(walletClient, closeInfo, chain.id);
 
+        // Custody.close(bytes32 channelId, State candidate, State[] proofs)
         const closeHash = await walletClient.writeContract({
           address: CUSTODY_ADDRESS,
           abi: CUSTODY_ABI,
           functionName: 'close',
           args: [
+            // 1. channelId (bytes32)
+            closeInfo.channelId as `0x${string}`,
+            // 2. candidate (State struct)
             {
               intent: closeInfo.state.intent,
               version: BigInt(closeInfo.state.version),
@@ -460,7 +458,8 @@ export function useYellowDeposit(): UseYellowDepositReturn {
               })),
               sigs: [closeSig, closeInfo.serverSignature as `0x${string}`],
             },
-            (closeInfo.state.stateData || '0x') as `0x${string}`,
+            // 3. proofs (State[] — empty for cooperative close)
+            [],
           ],
         });
 
@@ -472,9 +471,8 @@ export function useYellowDeposit(): UseYellowDepositReturn {
         await new Promise((r) => setTimeout(r, 2000));
         await refreshBalances();
 
-        console.log('[useYellowDeposit] ✓ DEPOSIT COMPLETE');
+        console.log('[useYellowDeposit] ✓ DEPOSIT COMPLETE (channel closed)');
         setStep('complete');
-        */
       } catch (err) {
         console.error('[useYellowDeposit] ✗✗✗ DEPOSIT FAILED ✗✗✗');
         console.error('[useYellowDeposit] Error:', err);
