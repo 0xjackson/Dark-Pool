@@ -716,8 +716,17 @@ export async function requestCreateChannel(
   }
 
   const data = parsed.params as any;
+
+  // SDK's parseAnyRPCResponse transforms snake_case → camelCase,
+  // so use camelCase fields (serverSignature, channelId, stateData).
+  // Fall back to snake_case in case raw response leaks through.
+  const serverSig = data.serverSignature || data.server_signature || '';
+  if (!serverSig) {
+    console.error('[createChannel] WARNING: empty server signature! Raw params:', JSON.stringify(data, null, 2));
+  }
+
   return {
-    channelId: data.channel_id,
+    channelId: data.channelId || data.channel_id,
     channel: {
       participants: data.channel?.participants || [],
       adjudicator: data.channel?.adjudicator || '',
@@ -727,14 +736,14 @@ export async function requestCreateChannel(
     state: {
       intent: data.state?.intent || 1,
       version: data.state?.version || 0,
-      stateData: data.state?.state_data || '0x',
+      stateData: data.state?.stateData || data.state?.state_data || '0x',
       allocations: (data.state?.allocations || []).map((a: any) => ({
         destination: a.destination || a.participant,
         token: a.token || a.token_address,
         amount: String(a.amount || '0'),
       })),
     },
-    serverSignature: data.server_signature || '',
+    serverSignature: serverSig,
   };
 }
 
@@ -769,20 +778,26 @@ export async function requestResizeChannel(
   }
 
   const data = parsed.params as any;
+
+  const serverSig = data.serverSignature || data.server_signature || '';
+  if (!serverSig) {
+    console.error('[resizeChannel] WARNING: empty server signature! Raw params:', JSON.stringify(data, null, 2));
+  }
+
   return {
-    channelId: data.channel_id,
+    channelId: data.channelId || data.channel_id,
     channel: { participants: [], adjudicator: '', challenge: 0, nonce: 0 },
     state: {
       intent: data.state?.intent || 2,
       version: data.state?.version || 0,
-      stateData: data.state?.state_data || '0x',
+      stateData: data.state?.stateData || data.state?.state_data || '0x',
       allocations: (data.state?.allocations || []).map((a: any) => ({
         destination: a.destination || a.participant,
         token: a.token || a.token_address,
         amount: String(a.amount || '0'),
       })),
     },
-    serverSignature: data.server_signature || '',
+    serverSignature: serverSig,
   };
 }
 
