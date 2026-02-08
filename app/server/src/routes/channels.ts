@@ -31,7 +31,10 @@ router.post('/create', async (req: Request, res: Response) => {
 
     return res.json(channelInfo);
   } catch (error: any) {
-    console.error('Error creating channel:', error);
+    if (error.message?.includes('No active WS')) {
+      return res.status(401).json({ error: 'Session key not authenticated. Please reconnect your wallet.', message: error.message });
+    }
+    console.error('Error creating channel:', error.message);
     res.status(500).json({ error: 'Failed to create channel', message: error.message });
   }
 });
