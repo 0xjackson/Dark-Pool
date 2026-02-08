@@ -716,6 +716,8 @@ export async function requestCreateChannel(
   }
 
   const data = parsed.params as any;
+  console.log('[create_channel] clearnode response keys:', Object.keys(data));
+  console.log('[create_channel] full response:', JSON.stringify(data, null, 2));
   return {
     channelId: data.channel_id,
     channel: {
@@ -734,7 +736,7 @@ export async function requestCreateChannel(
         amount: String(a.amount || '0'),
       })),
     },
-    serverSignature: data.server_signature || '',
+    serverSignature: data.server_signature || data.state_signature || data.signature || '',
   };
 }
 
@@ -769,6 +771,8 @@ export async function requestResizeChannel(
   }
 
   const data = parsed.params as any;
+  console.log('[resize_channel] clearnode response keys:', Object.keys(data));
+  console.log('[resize_channel] full response:', JSON.stringify(data, null, 2));
   return {
     channelId: data.channel_id,
     channel: { participants: [], adjudicator: '', challenge: 0, nonce: 0 },
@@ -782,7 +786,7 @@ export async function requestResizeChannel(
         amount: String(a.amount || '0'),
       })),
     },
-    serverSignature: data.server_signature || '',
+    serverSignature: data.server_signature || data.state_signature || data.signature || '',
   };
 }
 
