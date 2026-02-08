@@ -22,10 +22,13 @@ export class DarkPoolWebSocketServer {
   private clients: Map<WebSocket, Client> = new Map();
   private channels: Map<string, Set<WebSocket>> = new Map();
 
+  private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
+
   constructor(server: Server) {
     this.wss = new WebSocketServer({ server, path: '/ws' });
     this.setupWebSocketServer();
     this.subscribeToMatchStream();
+    this.startHeartbeat();
   }
 
   private setupWebSocketServer() {
@@ -308,10 +311,34 @@ export class DarkPoolWebSocketServer {
   }
 
   /**
+   * Ping all connected clients every 30s to keep connections alive through proxies.
+   * Clients that don't respond are terminated.
+   */
+  private startHeartbeat() {
+    this.heartbeatInterval = setInterval(() => {
+      this.wss.clients.forEach((ws) => {
+        if ((ws as any).__isAlive === false) {
+          ws.terminate();
+          return;
+        }
+        (ws as any).__isAlive = false;
+        ws.ping();
+      });
+    }, 30_000);
+
+    this.wss.on('connection', (ws) => {
+      (ws as any).__isAlive = true;
+      ws.on('pong', () => { (ws as any).__isAlive = true; });
+    });
+  }
+
+  /**
    * Shutdown the WebSocket server
    */
   public shutdown() {
     console.log('Shutting down WebSocket server...');
+
+    if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
 
     // Close all client connections
     this.clients.forEach((client) => {

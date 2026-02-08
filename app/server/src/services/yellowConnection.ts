@@ -541,18 +541,17 @@ export interface ChannelRecord {
 /**
  * Request channel creation from the clearnode.
  * Returns channel params + broker signature for on-chain Custody.create().
- * Message must go over the USER's authenticated WS.
+ * Uses engine WS — clearnode validates message sigs, not WS connection.
  */
 export async function requestCreateChannel(
   userAddress: Address,
   chainId: number,
   token: string,
 ): Promise<ChannelInfo> {
+  if (!engineWs) throw new Error('Engine WS not connected');
   const addr = getAddress(userAddress);
-  const userWs = getUserWs(addr);
-  if (!userWs) throw new Error(`No active WS for user ${addr}. Re-authenticate session key.`);
 
-  // Load session key to sign the RPC message
+  // Sign with user's session key from DB
   const signer = await getUserSessionKeySigner(addr);
 
   const msg = await createCreateChannelMessage(signer, {
@@ -560,7 +559,7 @@ export async function requestCreateChannel(
     token: token as `0x${string}`,
   });
 
-  const raw = await sendAndWait(userWs, msg);
+  const raw = await sendAndWait(engineWs, msg);
   const parsed = parseAnyRPCResponse(raw);
 
   if (parsed.method === RPCMethod.Error) {
@@ -593,6 +592,7 @@ export async function requestCreateChannel(
 /**
  * Request channel resize from the clearnode.
  * Returns updated state + broker signature for on-chain Custody.resize().
+ * Uses engine WS — clearnode validates message sigs, not WS connection.
  */
 export async function requestResizeChannel(
   userAddress: Address,
@@ -600,9 +600,8 @@ export async function requestResizeChannel(
   resizeAmount: string,
   allocateAmount: string,
 ): Promise<ChannelInfo> {
+  if (!engineWs) throw new Error('Engine WS not connected');
   const addr = getAddress(userAddress);
-  const userWs = getUserWs(addr);
-  if (!userWs) throw new Error(`No active WS for user ${addr}. Re-authenticate session key.`);
 
   const signer = await getUserSessionKeySigner(addr);
 
@@ -613,7 +612,7 @@ export async function requestResizeChannel(
     funds_destination: addr,
   });
 
-  const raw = await sendAndWait(userWs, msg);
+  const raw = await sendAndWait(engineWs, msg);
   const parsed = parseAnyRPCResponse(raw);
 
   if (parsed.method === RPCMethod.Error) {
