@@ -229,11 +229,12 @@ export function useYellowDeposit(): UseYellowDepositReturn {
         // Submit Custody.resize() on-chain
         setStep('submitting_resize');
         // Build the preceding state as proof (version - 1)
-        // Only the user (index 0) allocation changes by +rawAmount; broker (index 1) stays at 0
-        const precedingAllocations = resizeInfo.state.allocations.map((a, i) => ({
+        // The preceding state is the initial state (all-zero allocations) for the first resize,
+        // since the channel was created empty.
+        const precedingAllocations = resizeInfo.state.allocations.map((a) => ({
           destination: a.destination as `0x${string}`,
           token: a.token as `0x${string}`,
-          amount: i === 0 ? BigInt(a.amount) - rawAmount : BigInt(a.amount),
+          amount: 0n,
         }));
 
         const resizeHash = await walletClient.writeContract({
