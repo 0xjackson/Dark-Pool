@@ -210,7 +210,7 @@ export function useYellowDeposit(): UseYellowDepositReturn {
           address,
           channel.channelId,
           rawAmount.toString(),
-          rawAmount.toString(),
+          '0',
         );
 
         // Sign the resize state
