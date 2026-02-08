@@ -16,6 +16,7 @@ import {
   createPingMessageV2,
   createCreateChannelMessage,
   createResizeChannelMessage,
+  createCloseChannelMessage,
   createGetChannelsMessageV2,
   createGetLedgerBalancesMessage,
   parseAuthChallengeResponse,
@@ -868,6 +869,31 @@ export async function requestResizeChannel(
     },
     serverSignature: serverSig,
   };
+}
+
+/**
+ * Request channel close from clearnode.
+ * Returns the final state + server signature for on-chain submission.
+ */
+export async function requestCloseChannel(
+  userAddress: Address,
+  channelId: `0x${string}`,
+  fundsDestination: Address,
+): Promise<any> {
+  console.log(`[requestCloseChannel] START for ${userAddress} channel: ${channelId}`);
+
+  const ws = await ensureUserWs(userAddress);
+  const signer = await getUserSessionKeySigner(userAddress);
+
+  console.log(`[requestCloseChannel] Sending close_channel RPC...`);
+
+  const message = await createCloseChannelMessage(
+    signer,
+    channelId,
+    fundsDestination,
+  );
+
+  return sendRpc(ws, message, 'close_channel');
 }
 
 /**

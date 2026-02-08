@@ -23,6 +23,8 @@ export type DepositStep =
   | 'requesting_resize'
   | 'signing_resize_state'
   | 'submitting_resize'
+  | 'closing_channel'
+  | 'submitting_close'
   | 'complete'
   | 'error';
 
@@ -37,6 +39,8 @@ const STEP_MESSAGES: Record<DepositStep, string> = {
   requesting_resize: 'Requesting channel resize\u2026',
   signing_resize_state: 'Sign resize state in wallet\u2026',
   submitting_resize: 'Submitting resize on-chain\u2026',
+  closing_channel: 'Closing channel to unlock funds\u2026',
+  submitting_close: 'Finalizing on-chain\u2026',
   complete: 'Deposit complete!',
   error: 'Error',
 };
@@ -386,6 +390,67 @@ export function useYellowDeposit(): UseYellowDepositReturn {
           console.log('[useYellowDeposit] Refreshing balances...');
           await refreshBalances();
         }
+
+        // 🆕 Step 7: Close the channel to move funds to unified balance
+        console.log('[useYellowDeposit] 7️⃣ Closing channel to move funds to unified balance...');
+        setStep('closing_channel');
+
+        const closeResult = await withTimeout(
+          fetch(`${API_URL}/api/channel/close`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              address,
+              channelId: channel.channelId,
+              fundsDestination: address,
+            }),
+          }),
+          TIMEOUTS.RPC_CALL,
+          'Failed to request channel close from clearnode'
+        );
+
+        if (!closeResult.ok) {
+          throw new Error(`Close channel failed: ${await closeResult.text()}`);
+        }
+
+        const closeInfo = await closeResult.json();
+        console.log('[useYellowDeposit] Close prepared by clearnode');
+
+        // Step 8: Submit close transaction on-chain
+        setStep('submitting_close');
+        const closeSig = await signChannelState(walletClient, closeInfo, chain.id);
+
+        const closeHash = await withTimeout(
+          walletClient.writeContract({
+            address: CUSTODY_ADDRESS,
+            abi: CUSTODY_ABI,
+            functionName: 'close',
+            args: [
+              {
+                intent: closeInfo.state.intent,
+                version: BigInt(closeInfo.state.version),
+                data: (closeInfo.state.stateData || '0x') as `0x${string}`,
+                allocations: closeInfo.state.allocations.map((a: any) => ({
+                  destination: a.destination as `0x${string}`,
+                  token: a.token as `0x${string}`,
+                  amount: BigInt(a.amount),
+                })),
+                sigs: [closeSig, closeInfo.serverSignature as `0x${string}`],
+              },
+              (closeInfo.state.stateData || '0x') as `0x${string}`,
+            ],
+          }),
+          TIMEOUTS.TRANSACTION,
+          'Close transaction timed out'
+        );
+
+        console.log('[useYellowDeposit] ✓ Close tx:', closeHash);
+        await publicClient.waitForTransactionReceipt({ hash: closeHash });
+        console.log('[useYellowDeposit] ✓ Channel closed - funds moved to unified balance');
+
+        // Final refresh
+        await new Promise((r) => setTimeout(r, 2000));
+        await refreshBalances();
 
         console.log('[useYellowDeposit] ✓ DEPOSIT COMPLETE');
         setStep('complete');

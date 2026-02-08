@@ -247,6 +247,34 @@ export const CUSTODY_ABI = [
     outputs: [],
   },
   {
+    name: 'close',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      {
+        name: 'finalState',
+        type: 'tuple',
+        components: [
+          { name: 'intent', type: 'uint8' },
+          { name: 'version', type: 'uint256' },
+          { name: 'data', type: 'bytes' },
+          {
+            name: 'allocations',
+            type: 'tuple[]',
+            components: [
+              { name: 'destination', type: 'address' },
+              { name: 'token', type: 'address' },
+              { name: 'amount', type: 'uint256' },
+            ],
+          },
+          { name: 'sigs', type: 'bytes[]' },
+        ],
+      },
+      { name: 'stateData', type: 'bytes' },
+    ],
+    outputs: [],
+  },
+  {
     name: 'getAccountsBalances',
     type: 'function',
     stateMutability: 'view',

@@ -3,6 +3,7 @@ import { Address, getAddress } from 'viem';
 import {
   requestCreateChannel,
   requestResizeChannel,
+  requestCloseChannel,
   getLedgerBalances,
   getChannels,
 } from '../services/yellowConnection';
@@ -112,6 +113,31 @@ router.get('/list', async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('Error listing channels:', error);
     res.status(500).json({ error: 'Failed to list channels', message: error.message });
+  }
+});
+
+/**
+ * POST /api/channel/close
+ * Request channel close from clearnode.
+ * Body: { address, channelId, fundsDestination }
+ */
+router.post('/close', async (req: Request, res: Response) => {
+  try {
+    const { address, channelId, fundsDestination } = req.body;
+
+    if (!address || !channelId || !fundsDestination) {
+      return res.status(400).json({
+        error: 'address, channelId, and fundsDestination are required'
+      });
+    }
+
+    const addr = getAddress(address as Address);
+    const closeInfo = await requestCloseChannel(addr, channelId as `0x${string}`, fundsDestination as Address);
+
+    return res.json(closeInfo);
+  } catch (error: any) {
+    console.error('Error closing channel:', error);
+    res.status(500).json({ error: 'Failed to close channel', message: error.message });
   }
 });
 
