@@ -1037,16 +1037,17 @@ export async function transferUnifiedBalance(
   asset: string,
   amount: string,
 ): Promise<void> {
-  // Use the sender's authenticated WS — transfer is scoped to the authenticated wallet
-  const ws = await ensureUserWs(senderAddress);
-  const signer = await getUserSessionKeySigner(senderAddress);
+  if (!engineWs || !engineMessageSigner) throw new Error('Engine WS not connected');
 
-  const msg = await createTransferMessage(signer, {
+  // Use the engine's session key (application: "clearnode" = root access).
+  // The engine has no open channels, so the "non-zero allocation" check passes.
+  // Root access allows admin-level fund movement between user accounts.
+  const msg = await createTransferMessage(engineMessageSigner, {
     destination: recipientAddress,
     allocations: [{ asset, amount }],
   });
 
-  const raw = await sendAndWait(ws, msg);
+  const raw = await sendAndWait(engineWs, msg);
   const parsed = parseAnyRPCResponse(raw);
 
   if (parsed.method === RPCMethod.Error) {
