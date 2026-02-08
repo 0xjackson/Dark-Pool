@@ -8,7 +8,7 @@ import { Container } from '@/components/ui/Container';
 import { Logo } from '@/components/ui/Logo';
 import { ConnectWallet } from '@/components/wallet/ConnectWallet';
 import { WalletButton } from '@/components/wallet/WalletButton';
-import { BalancePanel } from '@/components/wallet/BalancePanel';
+import { BalancesToggle, BalancesDropdown } from '@/components/wallet/BalancePanel';
 import { OrdersDrawerToggle } from '@/components/trading/OrdersDrawerToggle';
 import { OrdersDropdown } from '@/components/trading/OrdersDropdown';
 import { useWalletConnection } from '@/hooks/useWalletConnection';
@@ -19,6 +19,7 @@ export default function Home() {
   const { isConnected } = useWalletConnection();
   const { address } = useAccount();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isBalancesOpen, setIsBalancesOpen] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   const { orders } = useUserOrders(address, {
@@ -59,7 +60,14 @@ export default function Home() {
         {isConnected ? (
           <div className="flex flex-col items-end">
             <WalletButton />
-            <BalancePanel />
+            <BalancesToggle
+              onClick={() => setIsBalancesOpen((prev) => !prev)}
+              isOpen={isBalancesOpen}
+            />
+            <BalancesDropdown
+              isOpen={isBalancesOpen}
+              onClose={() => setIsBalancesOpen(false)}
+            />
             {address && (
               <>
                 <OrdersDrawerToggle
