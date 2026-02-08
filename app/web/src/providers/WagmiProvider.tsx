@@ -5,6 +5,7 @@ import { WagmiProvider as WagmiProviderBase } from 'wagmi';
 import { RainbowKitProvider, darkTheme } from '@rainbow-me/rainbowkit';
 import { config, rainbowKitTheme } from '@/config/wagmi';
 import { SessionKeyProvider } from '@/providers/SessionKeyProvider';
+import { UnifiedBalanceProvider } from '@/providers/UnifiedBalanceProvider';
 import '@rainbow-me/rainbowkit/styles.css';
 
 /**
@@ -31,7 +32,9 @@ export function WagmiProvider({ children }: { children: React.ReactNode }) {
           })}
         >
           <SessionKeyProvider>
-            {children}
+            <UnifiedBalanceProvider>
+              {children}
+            </UnifiedBalanceProvider>
           </SessionKeyProvider>
         </RainbowKitProvider>
       </WagmiProviderBase>

@@ -1,14 +1,12 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAccount } from 'wagmi';
 import { useBalances, type TokenBalance } from '@/hooks/useBalances';
 import { useSessionKey } from '@/providers/SessionKeyProvider';
+import { useUnifiedBalance } from '@/providers/UnifiedBalanceProvider';
 import { WithdrawButton } from './WithdrawButton';
-import { getLedgerBalances, type LedgerBalance } from '@/services/api';
-
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001/ws';
 
 const CUSTODY_ADDRESS = process.env.NEXT_PUBLIC_CUSTODY_ADDRESS || '0x0000000000000000000000000000000000000000';
 
@@ -91,77 +89,7 @@ export function BalancesDropdown({ isOpen, onClose }: BalancesDropdownProps) {
   const { address } = useAccount();
   const { custodyBalances, walletBalances, isLoading, refetch } = useBalances();
   const { isActive: sessionKeyActive } = useSessionKey();
-  const [unifiedBalances, setUnifiedBalances] = useState<LedgerBalance[]>([]);
-
-  const refreshUnified = useCallback(async () => {
-    if (!address || !sessionKeyActive) return;
-    try {
-      const b = await getLedgerBalances(address);
-      setUnifiedBalances(b);
-    } catch (err) {
-      console.warn('[BalancePanel] refreshUnified failed:', err);
-    }
-  }, [address, sessionKeyActive]);
-
-  useEffect(() => {
-    refreshUnified();
-    const interval = setInterval(refreshUnified, 30_000);
-    return () => clearInterval(interval);
-  }, [refreshUnified]);
-
-  // Real-time balance updates via WS (clearnode bu notifications)
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    if (!address || !sessionKeyActive) return;
-
-    const connect = () => {
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
-
-      const ws = new WebSocket(WS_URL);
-
-      ws.onopen = () => {
-        ws.send(JSON.stringify({
-          type: 'subscribe',
-          payload: {
-            channel: `balances:${address}`,
-            userAddress: address,
-          },
-        }));
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          if (msg.type === 'balance_update') {
-            refreshUnified();
-          }
-        } catch {
-          // ignore non-JSON messages
-        }
-      };
-
-      ws.onclose = () => {
-        wsRef.current = null;
-        reconnectTimerRef.current = setTimeout(connect, 5000);
-      };
-
-      ws.onerror = () => {
-        // onclose will fire after this, triggering reconnect
-      };
-
-      wsRef.current = ws;
-    };
-
-    connect();
-
-    return () => {
-      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
-      wsRef.current?.close();
-      wsRef.current = null;
-    };
-  }, [address, sessionKeyActive, refreshUnified]);
+  const { balances: unifiedBalances, refreshBalances: refreshUnified } = useUnifiedBalance();
 
   // ESC key listener
   useEffect(() => {

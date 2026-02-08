@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useAccount, useChainId } from 'wagmi';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TokenPairSelector } from './TokenPairSelector';
@@ -9,6 +9,7 @@ import { SlippageInput } from './SlippageInput';
 import { useSubmitTrade } from '@/hooks/useSubmitTrade';
 import { useSessionKey } from '@/providers/SessionKeyProvider';
 import { useYellowDeposit } from '@/hooks/useYellowDeposit';
+import { useUnifiedBalance } from '@/providers/UnifiedBalanceProvider';
 import { validateOrderForm } from '@/utils/validation';
 import { TradingPair } from '@/types/trading';
 import { OrderType } from '@/types/order';
@@ -34,15 +35,14 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
   const { loading, error, success, submitTrade, stepMessage, reset } = useSubmitTrade();
   const { isActive: sessionKeyActive, isLoading: sessionKeyLoading, error: sessionKeyError, retry: retrySessionKey } = useSessionKey();
   const {
-    balances: unifiedBalances,
     deposit: yellowDeposit,
     loading: depositLoading,
     stepMessage: depositStepMessage,
     step: depositStep,
-    refreshBalances,
     reset: resetDeposit,
     error: depositError,
   } = useYellowDeposit();
+  const { balances: unifiedBalances } = useUnifiedBalance();
 
   // Form state
   const [tokenPair, setTokenPair] = useState<TradingPair | null>(null);
@@ -61,21 +61,13 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
     available: string;
   } | null>(null);
 
-  // Refresh unified balances when session key activates
-  useEffect(() => {
-    if (sessionKeyActive) {
-      refreshBalances();
-    }
-  }, [sessionKeyActive, refreshBalances]);
-
   // Clear deposit state when deposit completes
   useEffect(() => {
     if (depositStep === 'complete') {
       setInsufficientBalance(null);
-      refreshBalances();
       resetDeposit();
     }
-  }, [depositStep, refreshBalances, resetDeposit]);
+  }, [depositStep, resetDeposit]);
 
   // Handle successful submission
   useEffect(() => {

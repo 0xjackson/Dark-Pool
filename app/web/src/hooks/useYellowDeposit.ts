@@ -4,11 +4,10 @@ import { parseUnits, maxUint256, keccak256, encodeAbiParameters, zeroAddress } f
 import {
   requestCreateChannel,
   requestResizeChannel,
-  getLedgerBalances,
   getChannels,
   type ChannelInfo,
-  type LedgerBalance,
 } from '@/services/api';
+import { useUnifiedBalance } from '@/providers/UnifiedBalanceProvider';
 import { CUSTODY_ADDRESS, CUSTODY_ABI, ERC20_ABI } from '@/config/contracts';
 
 const NATIVE_ETH = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
@@ -47,9 +46,7 @@ interface UseYellowDepositReturn {
   stepMessage: string;
   loading: boolean;
   error: string | null;
-  balances: LedgerBalance[];
   deposit: (token: string, amount: string, decimals: number) => Promise<void>;
-  refreshBalances: () => Promise<void>;
   reset: () => void;
 }
 
@@ -67,10 +64,10 @@ export function useYellowDeposit(): UseYellowDepositReturn {
   const { address, isConnected, chain } = useAccount();
   const publicClient = usePublicClient();
   const { data: walletClient } = useWalletClient();
+  const { refreshBalances } = useUnifiedBalance();
 
   const [step, setStep] = useState<DepositStep>('idle');
   const [error, setError] = useState<string | null>(null);
-  const [balances, setBalances] = useState<LedgerBalance[]>([]);
 
   const loading = step !== 'idle' && step !== 'complete' && step !== 'error';
   const stepMessage = STEP_MESSAGES[step];
@@ -79,16 +76,6 @@ export function useYellowDeposit(): UseYellowDepositReturn {
     setStep('idle');
     setError(null);
   }, []);
-
-  const refreshBalances = useCallback(async () => {
-    if (!address) return;
-    try {
-      const b = await getLedgerBalances(address);
-      setBalances(b);
-    } catch (err) {
-      console.warn('[useYellowDeposit] refreshBalances failed:', err);
-    }
-  }, [address]);
 
   const deposit = useCallback(
     async (token: string, amount: string, decimals: number): Promise<void> => {
@@ -274,19 +261,11 @@ export function useYellowDeposit(): UseYellowDepositReturn {
         });
         await publicClient.waitForTransactionReceipt({ hash: resizeHash });
 
-        // Retry fetching balances — clearnode needs time to process the Resized event
+        // Retry refreshing shared balance — clearnode needs time to process the Resized event
         const delays = [2000, 3000, 5000];
         for (const delay of delays) {
           await new Promise((r) => setTimeout(r, delay));
-          try {
-            const b = await getLedgerBalances(address);
-            if (b.length > 0) {
-              setBalances(b);
-              break;
-            }
-          } catch {
-            // Will retry or WS subscription / polling will catch up
-          }
+          await refreshBalances();
         }
 
         setStep('complete');
@@ -307,9 +286,7 @@ export function useYellowDeposit(): UseYellowDepositReturn {
     stepMessage,
     loading,
     error,
-    balances,
     deposit,
-    refreshBalances,
     reset,
   };
 }
