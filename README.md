@@ -55,6 +55,10 @@ cp .env.example .env
 npm run docker:up && npm run migrate
 ```
 
+OR
+
+Navigate to: https://portal-production-7c82.up.railway.app/
+
 ## License
 
 MIT
