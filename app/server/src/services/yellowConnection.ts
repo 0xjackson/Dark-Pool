@@ -314,10 +314,12 @@ export async function openUserWs(
 
   ws.on('close', () => {
     userWsPool.delete(getAddress(userAddress as Address));
+    stopUserPing(userAddress);
     console.log(`User WS closed: ${userAddress}`);
   });
 
   userWsPool.set(getAddress(userAddress as Address), ws);
+  startUserPing(userAddress);
   return ws;
 }
 
@@ -363,6 +365,8 @@ export async function authenticateUserWs(
 
   ws.on('close', () => {
     userWsPool.delete(getAddress(userAddress as Address));
+    stopUserPing(userAddress);
+    console.log(`User WS closed: ${userAddress}`);
   });
 
   userWsPool.set(getAddress(userAddress as Address), ws);
@@ -385,6 +389,37 @@ export async function authenticateUserWs(
   return { ws, challengeRaw, eip712 };
 }
 
+// Keepalive timers for user WS connections
+const userPingIntervals: Map<string, ReturnType<typeof setInterval>> = new Map();
+
+function startUserPing(userAddress: string) {
+  const addr = getAddress(userAddress as Address);
+  // Clear existing interval if any
+  const existing = userPingIntervals.get(addr);
+  if (existing) clearInterval(existing);
+
+  const interval = setInterval(() => {
+    const ws = userWsPool.get(addr);
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      const pingMsg = createPingMessageV2();
+      ws.send(pingMsg);
+    } else {
+      clearInterval(interval);
+      userPingIntervals.delete(addr);
+    }
+  }, PING_INTERVAL_MS);
+  userPingIntervals.set(addr, interval);
+}
+
+function stopUserPing(userAddress: string) {
+  const addr = getAddress(userAddress as Address);
+  const interval = userPingIntervals.get(addr);
+  if (interval) {
+    clearInterval(interval);
+    userPingIntervals.delete(addr);
+  }
+}
+
 export async function completeUserAuth(
   userAddress: string,
   signature: Hex,
@@ -405,6 +440,10 @@ export async function completeUserAuth(
   if (verifyParsed.method === RPCMethod.Error) {
     throw new Error(`User auth verify failed: ${JSON.stringify(verifyParsed.params)}`);
   }
+
+  // Start keepalive pings so the user WS stays alive for channel operations
+  startUserPing(userAddress);
+  console.log(`User WS authenticated and keepalive started: ${userAddress}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -541,15 +580,16 @@ export interface ChannelRecord {
 /**
  * Request channel creation from the clearnode.
  * Returns channel params + broker signature for on-chain Custody.create().
- * Uses engine WS — clearnode validates message sigs, not WS connection.
+ * Must use the USER's authenticated WS — clearnode checks c.UserID matches signer.
  */
 export async function requestCreateChannel(
   userAddress: Address,
   chainId: number,
   token: string,
 ): Promise<ChannelInfo> {
-  if (!engineWs) throw new Error('Engine WS not connected');
   const addr = getAddress(userAddress);
+  const ws = getUserWs(addr);
+  if (!ws) throw new Error('No active session key — please reconnect your wallet');
 
   // Sign with user's session key from DB
   const signer = await getUserSessionKeySigner(addr);
@@ -559,7 +599,7 @@ export async function requestCreateChannel(
     token: token as `0x${string}`,
   });
 
-  const raw = await sendAndWait(engineWs, msg);
+  const raw = await sendAndWait(ws, msg);
   const parsed = parseAnyRPCResponse(raw);
 
   if (parsed.method === RPCMethod.Error) {
@@ -592,7 +632,7 @@ export async function requestCreateChannel(
 /**
  * Request channel resize from the clearnode.
  * Returns updated state + broker signature for on-chain Custody.resize().
- * Uses engine WS — clearnode validates message sigs, not WS connection.
+ * Must use the USER's authenticated WS — clearnode checks c.UserID matches signer.
  */
 export async function requestResizeChannel(
   userAddress: Address,
@@ -600,8 +640,9 @@ export async function requestResizeChannel(
   resizeAmount: string,
   allocateAmount: string,
 ): Promise<ChannelInfo> {
-  if (!engineWs) throw new Error('Engine WS not connected');
   const addr = getAddress(userAddress);
+  const ws = getUserWs(addr);
+  if (!ws) throw new Error('No active session key — please reconnect your wallet');
 
   const signer = await getUserSessionKeySigner(addr);
 
@@ -612,7 +653,7 @@ export async function requestResizeChannel(
     funds_destination: addr,
   });
 
-  const raw = await sendAndWait(engineWs, msg);
+  const raw = await sendAndWait(ws, msg);
   const parsed = parseAnyRPCResponse(raw);
 
   if (parsed.method === RPCMethod.Error) {
