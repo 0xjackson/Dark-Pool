@@ -52,12 +52,35 @@ router.post('/create', async (req: Request, res: Response) => {
         });
       }
 
-      // WS died (e.g. server restart) — re-authenticate with existing key
-      // For now, return active: true and let the settlement worker handle re-auth
+      // WS died (e.g. server restart) — re-auth with existing key from DB
+      const skAddress = existing.rows[0].address as Address;
+      const expiresAt = BigInt(Math.floor(new Date(existing.rows[0].expires_at).getTime() / 1000));
+
+      // Load allowances from DB (fallback to defaults)
+      const keyRow = await db.query(
+        `SELECT allowances FROM session_keys WHERE owner = $1 AND address = $2`,
+        [addr, skAddress],
+      );
+      let userAllowances = [
+        { asset: 'usdc', amount: '10000' },
+        { asset: 'eth', amount: '10' },
+      ];
+      if (keyRow.rows[0]?.allowances) {
+        try { userAllowances = JSON.parse(keyRow.rows[0].allowances); } catch {}
+      }
+
+      const { challengeRaw, eip712 } = await authenticateUserWs(
+        addr,
+        skAddress,
+        expiresAt,
+        userAllowances,
+      );
+
       return res.json({
-        active: true,
-        sessionKeyAddress: existing.rows[0].address,
-        expiresAt: existing.rows[0].expires_at,
+        active: false,
+        sessionKeyAddress: skAddress,
+        challengeRaw,
+        eip712,
       });
     }
 
@@ -118,23 +141,24 @@ router.post('/activate', async (req: Request, res: Response) => {
 
     const addr = getAddress(userAddress as Address);
 
-    // Verify the user has a PENDING session key
-    const pending = await db.query(
+    // Find session key awaiting activation (PENDING for new, ACTIVE for re-auth after WS death)
+    const keyRow = await db.query(
       `SELECT address FROM session_keys
-       WHERE owner = $1 AND status = 'PENDING'`,
+       WHERE owner = $1 AND status IN ('PENDING', 'ACTIVE')
+       LIMIT 1`,
       [addr],
     );
 
-    if (pending.rows.length === 0) {
-      return res.status(404).json({ error: 'No pending session key found for this user' });
+    if (keyRow.rows.length === 0) {
+      return res.status(404).json({ error: 'No session key found for this user' });
     }
 
-    const sessionKeyAddress = pending.rows[0].address;
+    const sessionKeyAddress = keyRow.rows[0].address;
 
     // Complete auth on Yellow
     await completeUserAuth(addr, signature as Hex, challengeRaw);
 
-    // Activate in DB
+    // Ensure status is ACTIVE
     await db.query(
       `UPDATE session_keys SET status = 'ACTIVE'
        WHERE owner = $1 AND address = $2`,
