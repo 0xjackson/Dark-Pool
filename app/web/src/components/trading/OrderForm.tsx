@@ -7,7 +7,7 @@ import { TokenPairSelector } from './TokenPairSelector';
 import { OrderTypeToggle } from './OrderTypeToggle';
 import { SlippageInput } from './SlippageInput';
 import { useSubmitTrade } from '@/hooks/useSubmitTrade';
-import { useSessionKey } from '@/hooks/useSessionKey';
+import { useSessionKey } from '@/providers/SessionKeyProvider';
 import { useYellowDeposit } from '@/hooks/useYellowDeposit';
 import { validateOrderForm } from '@/utils/validation';
 import { TradingPair } from '@/types/trading';

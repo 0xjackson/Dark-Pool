@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { useAccount } from 'wagmi';
 import { useTradeModal } from '@/hooks/useTradeModal';
 import { TradeModal } from '@/components/trading/TradeModal';
-import { useSessionKey } from '@/hooks/useSessionKey';
+import { useSessionKey } from '@/providers/SessionKeyProvider';
 
 /**
  * Hero section for center content

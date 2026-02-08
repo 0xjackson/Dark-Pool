@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, useRef, ReactNode } from 'react';
 import { useAccount, useSignTypedData } from 'wagmi';
 import { createSessionKey, activateSessionKey } from '@/services/api';
 import { ApiError } from '@/utils/errors';
 
 type SessionKeyStatus = 'idle' | 'creating' | 'signing' | 'activating' | 'active' | 'error';
 
-interface UseSessionKeyReturn {
+interface SessionKeyContextValue {
   status: SessionKeyStatus;
   isActive: boolean;
   isLoading: boolean;
@@ -16,7 +16,9 @@ interface UseSessionKeyReturn {
   retry: () => void;
 }
 
-export function useSessionKey(): UseSessionKeyReturn {
+const SessionKeyContext = createContext<SessionKeyContextValue | null>(null);
+
+export function SessionKeyProvider({ children }: { children: ReactNode }) {
   const { address, isConnected } = useAccount();
   const { signTypedDataAsync } = useSignTypedData();
 
@@ -35,25 +37,20 @@ export function useSessionKey(): UseSessionKeyReturn {
     setStatus('creating');
 
     try {
-      // Step 1: POST /create
       const response = await createSessionKey(address);
 
-      // Already have an active session key
       if (response.active) {
         setExpiresAt(response.expiresAt ?? null);
         setStatus('active');
         return;
       }
 
-      // Need user to sign the EIP-712 challenge
       if (!response.eip712 || !response.challengeRaw) {
         throw new Error('Server returned incomplete session key data');
       }
 
-      // Step 2: Sign EIP-712 typed data
       setStatus('signing');
 
-      // Strip EIP712Domain from types — viem adds it automatically
       const { EIP712Domain, ...types } = response.eip712.types as Record<string, unknown>;
 
       const signature = await signTypedDataAsync({
@@ -63,7 +60,6 @@ export function useSessionKey(): UseSessionKeyReturn {
         message: response.eip712.message as any,
       });
 
-      // Step 3: POST /activate
       setStatus('activating');
       const activateResponse = await activateSessionKey(
         address,
@@ -76,7 +72,6 @@ export function useSessionKey(): UseSessionKeyReturn {
     } catch (err: unknown) {
       setStatus('error');
 
-      // Check for user rejection (wallet popup dismissed)
       if (
         err instanceof Error &&
         (err.name === 'UserRejectedRequestError' ||
@@ -120,12 +115,17 @@ export function useSessionKey(): UseSessionKeyReturn {
     }
   }, [isConnected]);
 
-  return {
-    status,
-    isActive,
-    isLoading,
-    error,
-    expiresAt,
-    retry,
-  };
+  return (
+    <SessionKeyContext.Provider value={{ status, isActive, isLoading, error, expiresAt, retry }}>
+      {children}
+    </SessionKeyContext.Provider>
+  );
+}
+
+export function useSessionKey(): SessionKeyContextValue {
+  const context = useContext(SessionKeyContext);
+  if (!context) {
+    throw new Error('useSessionKey must be used within a SessionKeyProvider');
+  }
+  return context;
 }

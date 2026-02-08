@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { WagmiProvider as WagmiProviderBase } from 'wagmi';
 import { RainbowKitProvider, darkTheme } from '@rainbow-me/rainbowkit';
 import { config, rainbowKitTheme } from '@/config/wagmi';
+import { SessionKeyProvider } from '@/providers/SessionKeyProvider';
 import '@rainbow-me/rainbowkit/styles.css';
 
 /**
@@ -29,7 +30,9 @@ export function WagmiProvider({ children }: { children: React.ReactNode }) {
             overlayBlur: 'small',
           })}
         >
-          {children}
+          <SessionKeyProvider>
+            {children}
+          </SessionKeyProvider>
         </RainbowKitProvider>
       </WagmiProviderBase>
     </QueryClientProvider>

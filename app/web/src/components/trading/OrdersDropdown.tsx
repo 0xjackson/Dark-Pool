@@ -90,18 +90,18 @@ export function OrdersDropdown({ isOpen, onClose, userAddress, onRefreshTrigger 
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -8 }}
           transition={{ duration: 0.2, ease: 'easeOut' }}
-          className="bg-dark-surface/50 backdrop-blur-sm border border-purple-primary/20 rounded-xl w-[280px] mt-3 overflow-hidden"
+          className="bg-dark-elevated/70 backdrop-blur-xl border border-purple-primary/20 rounded-xl w-[280px] mt-3 overflow-hidden shadow-lg"
         >
           {/* Header */}
           <div className="flex items-center justify-between px-4 pt-3 pb-2">
             <h3 className="text-xs font-semibold text-purple-secondary uppercase tracking-wider">
               Orders
             </h3>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1.5">
               <button
                 type="button"
                 onClick={handleRefresh}
-                className="text-xs text-purple-secondary/70 hover:text-purple-primary transition-colors"
+                className="px-2 py-1 text-xs text-purple-secondary/60 hover:text-purple-secondary bg-dark-bg/30 hover:bg-dark-bg/50 border border-purple-primary/10 hover:border-purple-primary/20 rounded-md transition-all duration-200"
                 disabled={ordersLoading || matchesLoading}
               >
                 {ordersLoading || matchesLoading ? '...' : 'Refresh'}
@@ -109,7 +109,7 @@ export function OrdersDropdown({ isOpen, onClose, userAddress, onRefreshTrigger 
               <button
                 type="button"
                 onClick={onClose}
-                className="p-1 text-purple-secondary/70 hover:text-white transition-colors"
+                className="p-1 text-purple-secondary/50 hover:text-purple-secondary/80 bg-dark-bg/30 hover:bg-dark-bg/50 border border-purple-primary/10 hover:border-purple-primary/20 rounded-md transition-all duration-200"
                 aria-label="Close orders"
               >
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -120,19 +120,19 @@ export function OrdersDropdown({ isOpen, onClose, userAddress, onRefreshTrigger 
           </div>
 
           {/* Tabs */}
-          <div className="flex mx-3 mb-2 rounded-lg bg-dark-bg/50 p-0.5">
+          <div className="flex mx-3 mb-2 rounded-lg bg-dark-bg/40 backdrop-blur-sm border border-purple-primary/10 p-0.5">
             <button
               type="button"
               onClick={() => setActiveTab('orders')}
               className={`flex-1 px-2 py-1.5 text-xs font-medium rounded-md transition-all duration-200 ${
                 activeTab === 'orders'
-                  ? 'text-white bg-dark-surface/80'
-                  : 'text-purple-secondary hover:text-white'
+                  ? 'text-white bg-dark-elevated/80 backdrop-blur-xl border border-purple-primary/20 shadow-sm'
+                  : 'text-purple-secondary/70 hover:text-purple-secondary border border-transparent'
               }`}
             >
               Open
               {pendingCount > 0 && (
-                <span className="ml-1 px-1.5 py-0.5 rounded-full bg-purple-primary/20 text-purple-primary text-[10px]">
+                <span className="ml-1 px-1.5 py-0.5 rounded-full bg-purple-primary/15 text-purple-primary/80 text-[10px]">
                   {pendingCount}
                 </span>
               )}
@@ -142,13 +142,13 @@ export function OrdersDropdown({ isOpen, onClose, userAddress, onRefreshTrigger 
               onClick={() => setActiveTab('history')}
               className={`flex-1 px-2 py-1.5 text-xs font-medium rounded-md transition-all duration-200 ${
                 activeTab === 'history'
-                  ? 'text-white bg-dark-surface/80'
-                  : 'text-purple-secondary hover:text-white'
+                  ? 'text-white bg-dark-elevated/80 backdrop-blur-xl border border-purple-primary/20 shadow-sm'
+                  : 'text-purple-secondary/70 hover:text-purple-secondary border border-transparent'
               }`}
             >
               History
               {(completedOrders.length > 0 || matches.length > 0) && (
-                <span className="ml-1 px-1.5 py-0.5 rounded-full bg-purple-primary/20 text-purple-primary text-[10px]">
+                <span className="ml-1 px-1.5 py-0.5 rounded-full bg-purple-primary/15 text-purple-primary/80 text-[10px]">
                   {completedOrders.length + matches.length}
                 </span>
               )}
@@ -169,7 +169,7 @@ export function OrdersDropdown({ isOpen, onClose, userAddress, onRefreshTrigger 
                     <p className="mb-1">Failed to load orders</p>
                     <button
                       onClick={handleRefresh}
-                      className="text-purple-primary hover:text-purple-glow underline"
+                      className="px-2 py-0.5 text-purple-secondary/60 hover:text-purple-secondary bg-dark-bg/30 hover:bg-dark-bg/50 border border-purple-primary/10 hover:border-purple-primary/20 rounded-md transition-all duration-200"
                     >
                       Try again
                     </button>
@@ -211,7 +211,7 @@ export function OrdersDropdown({ isOpen, onClose, userAddress, onRefreshTrigger 
                     <p className="mb-1">Failed to load history</p>
                     <button
                       onClick={handleRefresh}
-                      className="text-purple-primary hover:text-purple-glow underline"
+                      className="px-2 py-0.5 text-purple-secondary/60 hover:text-purple-secondary bg-dark-bg/30 hover:bg-dark-bg/50 border border-purple-primary/10 hover:border-purple-primary/20 rounded-md transition-all duration-200"
                     >
                       Try again
                     </button>

@@ -65,7 +65,7 @@ export function OrderCard({ order }: OrderCardProps) {
   const quoteSymbol = getTokenSymbol(order.quote_token, order.chain_id);
 
   return (
-    <div className="bg-dark-surface/50 backdrop-blur-sm border border-purple-primary/20 rounded-lg p-4 hover:border-purple-primary/40 transition-all duration-200">
+    <div className="bg-dark-bg/40 backdrop-blur-sm border border-purple-primary/10 rounded-lg p-4 hover:border-purple-primary/25 transition-all duration-200">
       {/* Header - Type and Status */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
