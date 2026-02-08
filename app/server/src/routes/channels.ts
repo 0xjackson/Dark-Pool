@@ -26,6 +26,7 @@ router.post('/create', async (req: Request, res: Response) => {
 
     const addr = getAddress(userAddress as Address);
     const chainId = req.body.chainId || CHAIN_ID;
+    console.log('[create] chain_id being sent to clearnode:', chainId, '(from request:', req.body.chainId, ', env default:', CHAIN_ID, ')');
 
     const channelInfo = await requestCreateChannel(addr, chainId, token);
 
