@@ -89,6 +89,7 @@ router.get('/balances', async (req: Request, res: Response) => {
     const addr = getAddress(userAddress as Address);
     const balances = await getLedgerBalances(addr);
 
+    console.log(`[balances] ${addr}: ${JSON.stringify(balances)}`);
     return res.json({ balances });
   } catch (error: any) {
     console.error('Error getting balances:', error);
