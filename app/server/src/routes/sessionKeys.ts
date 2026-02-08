@@ -3,9 +3,9 @@ import { Pool } from 'pg';
 import { Hex, Address, getAddress } from 'viem';
 import { generateSessionKey } from '../utils/keygen';
 import {
-  getUserWs,
   authenticateUserWs,
   completeUserAuth,
+  getUserWs,
   revokeSessionKey,
 } from '../services/yellowConnection';
 
@@ -42,45 +42,12 @@ router.post('/create', async (req: Request, res: Response) => {
     );
 
     if (existing.rows.length > 0) {
-      // Already have an active key — check if WS is alive
-      const ws = getUserWs(addr);
-      if (ws) {
-        return res.json({
-          active: true,
-          sessionKeyAddress: existing.rows[0].address,
-          expiresAt: existing.rows[0].expires_at,
-        });
-      }
-
-      // WS died (e.g. server restart) — re-auth with existing key from DB
-      const skAddress = existing.rows[0].address as Address;
-      const expiresAt = BigInt(Math.floor(new Date(existing.rows[0].expires_at).getTime() / 1000));
-
-      // Load allowances from DB (fallback to defaults)
-      const keyRow = await db.query(
-        `SELECT allowances FROM session_keys WHERE owner = $1 AND address = $2`,
-        [addr, skAddress],
-      );
-      let userAllowances = [
-        { asset: 'usdc', amount: '10000' },
-        { asset: 'eth', amount: '10' },
-      ];
-      if (keyRow.rows[0]?.allowances) {
-        try { userAllowances = JSON.parse(keyRow.rows[0].allowances); } catch {}
-      }
-
-      const { challengeRaw, eip712 } = await authenticateUserWs(
-        addr,
-        skAddress,
-        expiresAt,
-        userAllowances,
-      );
-
+      // Key is ACTIVE and registered with Yellow — all channel ops
+      // route through engine WS, so no per-user WS needed.
       return res.json({
-        active: false,
-        sessionKeyAddress: skAddress,
-        challengeRaw,
-        eip712,
+        active: true,
+        sessionKeyAddress: existing.rows[0].address,
+        expiresAt: existing.rows[0].expires_at,
       });
     }
 
@@ -91,6 +58,7 @@ router.post('/create', async (req: Request, res: Response) => {
     const userAllowances = allowances || [
       { asset: 'usdc', amount: '10000' },
       { asset: 'eth', amount: '10' },
+      { asset: 'usdt', amount: '10000' },
     ];
 
     // Open WS to Yellow and get challenge for user to sign

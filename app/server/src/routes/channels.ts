@@ -31,11 +31,12 @@ router.post('/create', async (req: Request, res: Response) => {
 
     return res.json(channelInfo);
   } catch (error: any) {
-    if (error.message?.includes('No active WS')) {
-      return res.status(401).json({ error: 'Session key not authenticated. Please reconnect your wallet.', message: error.message });
+    const msg = error.message || '';
+    if (msg.includes('No active session key') || msg.includes('Engine WS not connected')) {
+      return res.status(401).json({ error: 'Session key not active. Please reconnect your wallet.', message: msg });
     }
-    console.error('Error creating channel:', error.message);
-    res.status(500).json({ error: 'Failed to create channel', message: error.message });
+    console.error('Error creating channel:', msg);
+    res.status(500).json({ error: 'Failed to create channel', message: msg });
   }
 });
 
@@ -63,8 +64,12 @@ router.post('/resize', async (req: Request, res: Response) => {
 
     return res.json(channelInfo);
   } catch (error: any) {
-    console.error('Error resizing channel:', error);
-    res.status(500).json({ error: 'Failed to resize channel', message: error.message });
+    const msg = error.message || '';
+    if (msg.includes('No active session key') || msg.includes('Engine WS not connected')) {
+      return res.status(401).json({ error: 'Session key not active. Please reconnect your wallet.', message: msg });
+    }
+    console.error('Error resizing channel:', msg);
+    res.status(500).json({ error: 'Failed to resize channel', message: msg });
   }
 });
 
