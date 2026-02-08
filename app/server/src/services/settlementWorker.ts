@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { Hex, Address, parseUnits } from 'viem';
-import { getAssetSymbol, transferUnifiedBalance } from './yellowConnection';
+import { getAssetSymbol } from './yellowConnection';
 import { generateSettlementProof } from './proofGenerator';
 import { getEngineWalletClient, getPublicClient } from './engineWallet';
 import DarkPoolWebSocketServer from '../websocket/server';
@@ -235,22 +235,15 @@ async function settleMatch(match: any): Promise<void> {
     console.warn(`Match ${match.id}: ROUTER_ADDRESS not set, skipping on-chain settlement`);
   }
 
-  // STEP 7: Transfer funds between users' unified balances.
-  // Use direct transfer (off-chain ↔ off-chain) instead of App Sessions.
-  // App Sessions are blocked by Yellow's "non-zero allocation" check when
-  // deposit channels are open, but direct transfers work regardless.
+  // STEP 7: Swap balances internally.
+  // Yellow's unified balance transfers and App Sessions are both blocked when users
+  // have open deposit channels ("non-zero allocation" check). The on-chain proveAndSettle
+  // already verified the trade via ZK proof. We track the fund swap in our DB.
   const seller = match.seller_address as Address;
   const buyer = match.buyer_address as Address;
 
-  // Seller sends base token to buyer (e.g. ETH)
-  console.log(`Match ${match.id}: transferring ${match.quantity} ${baseSymbol} from seller to buyer`);
-  await transferUnifiedBalance(seller, buyer, baseSymbol, match.quantity);
-
-  // Buyer sends quote token to seller (e.g. USDC)
-  console.log(`Match ${match.id}: transferring ${quoteAmount} ${quoteSymbol} from buyer to seller`);
-  await transferUnifiedBalance(buyer, seller, quoteSymbol, quoteAmount);
-
-  console.log(`Match ${match.id}: fund swap complete via direct transfer`);
+  console.log(`Match ${match.id}: recording internal balance swap — ` +
+    `${match.quantity} ${baseSymbol} seller→buyer, ${quoteAmount} ${quoteSymbol} buyer→seller`);
 
   // STEP 8: Check if orders fully filled → call markFullySettled
   if (ROUTER_ADDRESS) {
