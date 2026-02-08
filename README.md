@@ -1,6 +1,6 @@
 # Dark Pool
 
-A permissionless, decentralized OTC desk for peer-to-peer trading. Where price discovery is intent based, not market based. 
+A permissionless, decentralized OTC desk for peer-to-peer trading. Where price discovery is intent based, not market driven.
 
 ## Thesis
 
