@@ -55,6 +55,10 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
+# sharp native binaries aren't reliably included by Next.js standalone tracing
+COPY --from=builder /app/node_modules/sharp ./node_modules/sharp
+COPY --from=builder /app/node_modules/@img ./node_modules/@img
+
 # Set correct permissions
 RUN chown -R nextjs:nodejs /app
 
