@@ -11,6 +11,7 @@ import { useUnifiedBalance } from '@/providers/UnifiedBalanceProvider';
 import { CUSTODY_ADDRESS, CUSTODY_ABI, ERC20_ABI } from '@/config/contracts';
 
 const NATIVE_ETH = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 export type DepositStep =
   | 'idle'
@@ -395,7 +396,7 @@ export function useYellowDeposit(): UseYellowDepositReturn {
         console.log('[useYellowDeposit] 7️⃣ Closing channel to move funds to unified balance...');
         setStep('closing_channel');
 
-        const closeResult = await fetch(`${API_URL}/api/channel/close`, {
+        const closeResult = await fetch(`${API_BASE_URL}/api/channel/close`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
