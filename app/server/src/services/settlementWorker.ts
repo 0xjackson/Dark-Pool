@@ -1,11 +1,6 @@
 import { Pool } from 'pg';
-import { Hex, Address, getAddress, parseUnits } from 'viem';
-import {
-  getAssetSymbol,
-  getEngineAddress,
-  createAppSession,
-  closeAppSession,
-} from './yellowConnection';
+import { Hex, Address, parseUnits } from 'viem';
+import { getAssetSymbol } from './yellowConnection';
 import { generateSettlementProof } from './proofGenerator';
 import { getEngineWalletClient, getPublicClient } from './engineWallet';
 import DarkPoolWebSocketServer from '../websocket/server';
@@ -117,16 +112,7 @@ async function settleMatch(match: any): Promise<void> {
 
   if (claim.rows.length === 0) return; // already claimed by another worker
 
-  // STEP 1: Load all 3 session keys
-  const buyerKey = await loadSessionKey(match.buyer_address);
-  const sellerKey = await loadSessionKey(match.seller_address);
-  const engineKey = await loadSessionKey('warlock');
-
-  if (!buyerKey) throw new Error(`Missing session key for buyer ${match.buyer_address}`);
-  if (!sellerKey) throw new Error(`Missing session key for seller ${match.seller_address}`);
-  if (!engineKey) throw new Error('Missing warlock session key');
-
-  // STEP 2: Resolve symbols
+  // STEP 1: Resolve symbols
   const baseSymbol = getAssetSymbol(match.base_token);
   const quoteSymbol = getAssetSymbol(match.quote_token);
 
@@ -142,11 +128,7 @@ async function settleMatch(match: any): Promise<void> {
   const sellerFillAmountWei = parseUnits(match.quantity, baseDecimals).toString();
   const buyerFillAmountWei = parseUnits(quoteAmount, quoteDecimals).toString();
 
-  const engineAddress = getEngineAddress();
-  const seller = match.seller_address as Address;
-  const buyer = match.buyer_address as Address;
-
-  // STEP 3: Load full order details for ZK proof generation
+  // STEP 2: Load full order details for ZK proof generation
   const sellerOrder = await loadOrderDetails(match.sell_order_id);
   const buyerOrder = await loadOrderDetails(match.buy_order_id);
 
@@ -253,35 +235,14 @@ async function settleMatch(match: any): Promise<void> {
     console.warn(`Match ${match.id}: ROUTER_ADDRESS not set, skipping on-chain settlement`);
   }
 
-  // STEP 7: Create app session on Yellow
-  const appSessionId = await createAppSession(
-    sellerKey.private_key as Hex,
-    buyerKey.private_key as Hex,
-    [seller, buyer, engineAddress],
-    [
-      { participant: seller, asset: baseSymbol, amount: match.quantity },
-      { participant: buyer, asset: quoteSymbol, amount: quoteAmount },
-      { participant: engineAddress, asset: baseSymbol, amount: '0' },
-      { participant: engineAddress, asset: quoteSymbol, amount: '0' },
-    ],
-  );
+  // STEP 7: Skip App Session create/close for now.
+  // Yellow Network blocks App Session creation when users have open deposit channels
+  // ("non-zero allocation in N channel(s) detected"). The on-chain proveAndSettle
+  // already verified the trade via ZK proof. App Session fund swap will be added
+  // once we resolve the channel/App Session coexistence issue.
+  console.log(`Match ${match.id}: skipping App Session (channel coexistence not yet resolved)`);
 
-  await db.query(
-    `UPDATE matches SET app_session_id = $2 WHERE id = $1`,
-    [match.id, appSessionId],
-  );
-
-  console.log(`Match ${match.id}: app session created ${appSessionId}`);
-
-  // STEP 8: Close app session (THE SWAP — redistribute funds)
-  await closeAppSession(appSessionId as Hex, [
-    { participant: seller, asset: quoteSymbol, amount: quoteAmount }, // seller GETS quote
-    { participant: buyer, asset: baseSymbol, amount: match.quantity }, // buyer GETS base
-    { participant: engineAddress, asset: baseSymbol, amount: '0' },
-    { participant: engineAddress, asset: quoteSymbol, amount: '0' },
-  ]);
-
-  // STEP 9: Check if orders fully filled → call markFullySettled
+  // STEP 8: Check if orders fully filled → call markFullySettled
   if (ROUTER_ADDRESS) {
     const walletClient = getEngineWalletClient();
 
@@ -344,17 +305,6 @@ async function loadOrderDetails(orderId: string) {
   );
   if (result.rows.length === 0) throw new Error(`Order not found: ${orderId}`);
   return result.rows[0];
-}
-
-async function loadSessionKey(owner: string): Promise<{ address: string; private_key: string } | null> {
-  const checksummed = owner === 'warlock' ? owner : getAddress(owner as Address);
-  const result = await db.query(
-    `SELECT address, private_key FROM session_keys
-     WHERE owner = $1 AND status = 'ACTIVE' AND expires_at > NOW()
-     LIMIT 1`,
-    [checksummed],
-  );
-  return result.rows[0] || null;
 }
 
 /**

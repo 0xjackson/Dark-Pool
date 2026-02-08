@@ -11,7 +11,6 @@ import { useUnifiedBalance } from '@/providers/UnifiedBalanceProvider';
 import { CUSTODY_ADDRESS, CUSTODY_ABI, ERC20_ABI } from '@/config/contracts';
 
 const NATIVE_ETH = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 export type DepositStep =
   | 'idle'
@@ -24,8 +23,6 @@ export type DepositStep =
   | 'requesting_resize'
   | 'signing_resize_state'
   | 'submitting_resize'
-  | 'closing_channel'
-  | 'submitting_close'
   | 'complete'
   | 'error';
 
@@ -40,8 +37,6 @@ const STEP_MESSAGES: Record<DepositStep, string> = {
   requesting_resize: 'Requesting channel resize\u2026',
   signing_resize_state: 'Sign resize state in wallet\u2026',
   submitting_resize: 'Submitting resize on-chain\u2026',
-  closing_channel: 'Closing channel to unlock funds\u2026',
-  submitting_close: 'Finalizing on-chain\u2026',
   complete: 'Deposit complete!',
   error: 'Error',
 };
@@ -392,86 +387,14 @@ export function useYellowDeposit(): UseYellowDepositReturn {
           await refreshBalances();
         }
 
-        // Step 7: Close the channel to move funds to unified balance
-        // This is required so the user has no open channels, which would block App Session creation
-        console.log('[useYellowDeposit] 7️⃣ Closing channel to move funds to unified balance...');
-        setStep('closing_channel');
+        // NOTE: Do NOT close the channel after deposit.
+        // Closing the channel reverses the unified balance credit (clearnode debits
+        // the unified balance when it processes the Closed event). The channel must
+        // stay open to preserve the unified balance backing.
+        // The App Session "non-zero allocation" conflict will be resolved separately
+        // during settlement (engine-side channel management).
 
-        // Refetch channels to get current channelId (it may have changed after resize)
-        await new Promise((r) => setTimeout(r, 2000));
-        const latestChannels = await getChannels(address);
-        const latestChannel = latestChannels.find(
-          (ch) => ch.status === 'open' && ch.token?.toLowerCase() === custodyToken.toLowerCase()
-        );
-
-        if (!latestChannel) {
-          console.warn('[useYellowDeposit] No open channel found after resize, skipping close');
-          setStep('complete');
-          return;
-        }
-
-        console.log(`[useYellowDeposit] Closing channel ${latestChannel.channelId}`);
-
-        const closeResult = await fetch(`${API_BASE_URL}/api/channel/close`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            address,
-            channelId: latestChannel.channelId,
-            fundsDestination: address,
-          }),
-        });
-
-        if (!closeResult.ok) {
-          throw new Error(`Close channel failed: ${await closeResult.text()}`);
-        }
-
-        const closeInfo = await closeResult.json();
-        console.log('[useYellowDeposit] Close response from clearnode:', {
-          channelId: closeInfo.channelId,
-          intent: closeInfo.state.intent,
-          version: closeInfo.state.version,
-          allocations: closeInfo.state.allocations,
-        });
-
-        // Step 8: Sign and submit close transaction on-chain
-        setStep('submitting_close');
-        const closeSig = await signChannelState(walletClient, closeInfo, chain.id);
-
-        // Custody.close(bytes32 channelId, State candidate, State[] proofs)
-        const closeHash = await walletClient.writeContract({
-          address: CUSTODY_ADDRESS,
-          abi: CUSTODY_ABI,
-          functionName: 'close',
-          args: [
-            // 1. channelId (bytes32)
-            closeInfo.channelId as `0x${string}`,
-            // 2. candidate (State struct)
-            {
-              intent: closeInfo.state.intent,
-              version: BigInt(closeInfo.state.version),
-              data: (closeInfo.state.stateData || '0x') as `0x${string}`,
-              allocations: closeInfo.state.allocations.map((a: any) => ({
-                destination: a.destination as `0x${string}`,
-                token: a.token as `0x${string}`,
-                amount: BigInt(a.amount),
-              })),
-              sigs: [closeSig, closeInfo.serverSignature as `0x${string}`],
-            },
-            // 3. proofs (State[] — empty for cooperative close)
-            [],
-          ],
-        });
-
-        console.log('[useYellowDeposit] ✓ Close tx:', closeHash);
-        await publicClient.waitForTransactionReceipt({ hash: closeHash });
-        console.log('[useYellowDeposit] ✓ Channel closed - funds moved to unified balance');
-
-        // Final refresh
-        await new Promise((r) => setTimeout(r, 2000));
-        await refreshBalances();
-
-        console.log('[useYellowDeposit] ✓ DEPOSIT COMPLETE (channel closed)');
+        console.log('[useYellowDeposit] ✓ DEPOSIT COMPLETE (channel open, unified balance credited)');
         setStep('complete');
       } catch (err) {
         console.error('[useYellowDeposit] ✗✗✗ DEPOSIT FAILED ✗✗✗');
