@@ -14,6 +14,14 @@ import { validateOrderForm } from '@/utils/validation';
 import { TradingPair } from '@/types/trading';
 import { OrderType } from '@/types/order';
 
+/** Normalize clearnode asset names to match our token symbols (e.g. "weth" → "eth") */
+function normalizeAsset(asset: string): string {
+  const a = asset.toLowerCase();
+  if (a === 'weth') return 'eth';
+  if (a === 'wbtc') return 'wbtc';
+  return a;
+}
+
 interface OrderFormProps {
   onSuccess?: () => void;
 }
@@ -116,15 +124,16 @@ export function OrderForm({ onSuccess }: OrderFormProps) {
       return;
     }
 
-    // Check unified balance before submitting
+    // Check unified balance before submitting (provider polls every 15s)
     const isBuy = orderType === 'BUY';
     const sellToken = isBuy ? tokenPair!.quoteToken : tokenPair!.baseToken;
     const sellAmount = isBuy
       ? (parseFloat(amount) * parseFloat(price)).toString()
       : amount;
 
+    const sellSymbol = normalizeAsset(sellToken.symbol);
     const matchingBalance = unifiedBalances.find(
-      (b) => b.asset.toLowerCase() === sellToken.symbol.toLowerCase()
+      (b) => normalizeAsset(b.asset) === sellSymbol
     );
     const available = parseFloat(matchingBalance?.amount || '0');
 
