@@ -37,6 +37,11 @@ export function useSettlementUpdates(
   const { address } = useAccount();
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Store callbacks in refs so WS connection doesn't churn when they change
+  const onSettlementRef = useRef(onSettlement);
+  const onMatchRef = useRef(onMatch);
+  onSettlementRef.current = onSettlement;
+  onMatchRef.current = onMatch;
 
   const connect = useCallback(() => {
     if (!address) return;
@@ -47,7 +52,6 @@ export function useSettlementUpdates(
     const ws = new WebSocket(WS_URL);
 
     ws.onopen = () => {
-      // Subscribe using the server's expected protocol: { type, payload: { channel, userAddress } }
       ws.send(JSON.stringify({
         type: 'subscribe',
         payload: {
@@ -60,10 +64,10 @@ export function useSettlementUpdates(
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data) as WSMessage;
-        if (msg.type === 'settlement' && onSettlement) {
-          onSettlement(msg as SettlementEvent);
-        } else if (msg.type === 'match' && onMatch) {
-          onMatch(msg as MatchEvent);
+        if (msg.type === 'settlement' && onSettlementRef.current) {
+          onSettlementRef.current(msg as SettlementEvent);
+        } else if (msg.type === 'match' && onMatchRef.current) {
+          onMatchRef.current(msg as MatchEvent);
         }
       } catch {
         // ignore non-JSON messages
@@ -81,7 +85,7 @@ export function useSettlementUpdates(
     };
 
     wsRef.current = ws;
-  }, [address, onSettlement, onMatch]);
+  }, [address]); // only reconnect when address changes, not on callback changes
 
   useEffect(() => {
     connect();
